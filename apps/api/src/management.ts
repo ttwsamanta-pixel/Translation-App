@@ -16,10 +16,16 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import jwt from 'jsonwebtoken';
+import type { PoolConnection } from 'mysql2/promise';
 import { z } from 'zod';
 import { execute, rows, transaction } from '../../../packages/database/src/db';
 import { Article, normalizeHost } from '../../../packages/shared/src/article';
 import { production, secret } from '../../../packages/shared/src/config';
+import {
+  isProviderKind,
+  providerCatalog,
+  providerKinds,
+} from '../../../packages/shared/src/provider-catalog';
 import {
   encryptProviderCredential,
   providerCredentialEncryptionKey,
@@ -76,6 +82,13 @@ const groupSchema = z
   );
 const providerSchema = z.object({
   enabled: z.boolean(),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[a-z0-9][a-z0-9._:-]*$/i)
+    .optional(),
   cost_inr_per_million: z.number().min(0).max(9_999_999),
   api_key: z
     .string()
@@ -85,6 +98,22 @@ const providerSchema = z.object({
     .regex(/^[!-~]+$/, 'Enter a key without spaces')
     .optional(),
 });
+const createProviderSchema = providerSchema.extend({
+  name: z.string().trim().min(1).max(100),
+  adapter: z.enum(providerKinds),
+});
+
+async function saveProviderKey(conn: PoolConnection, id: number, value: string) {
+  const key = providerCredentialEncryptionKey();
+  if (!key)
+    throw new ServiceUnavailableException('Provider credential encryption is not configured on the server');
+  await execute(
+    `INSERT INTO provider_credentials (provider_id,encrypted_key) VALUES (?,?)
+      AS new ON DUPLICATE KEY UPDATE encrypted_key=new.encrypted_key`,
+    [id, encryptProviderCredential(value, key, id)],
+    conn,
+  );
+}
 const languageSchema = z.object({
   name: z.string().trim().min(1).max(80),
   code: z
@@ -160,7 +189,7 @@ const lists = {
   groups: `SELECT g.*,p.name provider,f.name fallback,(SELECT COUNT(*) FROM domains WHERE group_id=g.id) domains
     FROM translation_groups g JOIN translation_providers p ON p.id=g.provider_id LEFT JOIN translation_providers f ON f.id=g.fallback_provider_id
     WHERE (g.name LIKE ? OR p.name LIKE ?) AND (?='' OR g.enabled=?) ORDER BY g.priority,g.id`,
-  providers: `SELECT p.id,p.name,p.adapter,p.enabled,p.cost_inr_per_million,
+  providers: `SELECT p.id,p.name,p.adapter,p.model,p.enabled,p.cost_inr_per_million,
     EXISTS(SELECT 1 FROM provider_credentials c WHERE c.provider_id=p.id) has_stored_key
     FROM translation_providers p WHERE (p.name LIKE ? OR p.adapter LIKE ?) AND (?='' OR p.enabled=?) ORDER BY p.id`,
   languages:
@@ -441,6 +470,36 @@ export class AdminController {
     return { changed: Boolean(result.affectedRows) };
   }
 
+  @Post('providers')
+  async addProvider(@Req() request: Request, @Body() body: unknown) {
+    await authorize(request, ['super_admin', 'admin']);
+    const provider = parse(createProviderSchema, body);
+    const defaultModel = providerCatalog[provider.adapter].defaultModel;
+    if (provider.model && !defaultModel)
+      throw new BadRequestException('This provider uses its built-in translation model');
+    try {
+      return await transaction(async (conn) => {
+        const result = await execute(
+          'INSERT INTO translation_providers (name,adapter,model,enabled,cost_inr_per_million) VALUES (?,?,?,?,?)',
+          [
+            provider.name,
+            provider.adapter,
+            provider.model ?? defaultModel,
+            provider.enabled,
+            provider.cost_inr_per_million,
+          ],
+          conn,
+        );
+        if (provider.api_key) await saveProviderKey(conn, result.insertId, provider.api_key);
+        return { id: result.insertId };
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY')
+        throw new ConflictException('This provider name is already registered');
+      throw error;
+    }
+  }
+
   @Patch('providers/:id')
   async editProvider(@Req() request: Request, @Param('id') value: string, @Body() body: unknown) {
     const user = await authorize(request, managers);
@@ -456,25 +515,16 @@ export class AdminController {
         conn,
       );
       if (!existing) throw new NotFoundException();
-      if (provider.api_key) {
-        if (existing.adapter !== 'deepl')
-          throw new BadRequestException('This provider does not use an API key');
-        const key = providerCredentialEncryptionKey();
-        if (!key)
-          throw new ServiceUnavailableException(
-            'Provider credential encryption is not configured on the server',
-          );
-        const encrypted = encryptProviderCredential(provider.api_key, key, id);
-        await execute(
-          `INSERT INTO provider_credentials (provider_id,encrypted_key) VALUES (?,?)
-            AS new ON DUPLICATE KEY UPDATE encrypted_key=new.encrypted_key`,
-          [id, encrypted],
-          conn,
-        );
-      }
+      const adapter = existing.adapter;
+      const supported = isProviderKind(adapter);
+      if (provider.model && (!supported || !providerCatalog[adapter].defaultModel))
+        throw new BadRequestException('This provider uses its built-in translation model');
+      if (provider.api_key && !supported)
+        throw new BadRequestException('This provider does not use an API key');
+      if (provider.api_key) await saveProviderKey(conn, id, provider.api_key);
       await execute(
-        'UPDATE translation_providers SET enabled=?,cost_inr_per_million=? WHERE id=?',
-        [provider.enabled, provider.cost_inr_per_million, id],
+        'UPDATE translation_providers SET enabled=?,cost_inr_per_million=?,model=COALESCE(?,model) WHERE id=?',
+        [provider.enabled, provider.cost_inr_per_million, provider.model ?? null, id],
         conn,
       );
       return { changed: true };

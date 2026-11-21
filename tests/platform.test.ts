@@ -11,6 +11,81 @@ import { signWebhook, verifyWebhook, passwordHash, validPassword } from '../pack
 import { htmlSegments, rewriteLinks } from '../packages/shared/src/html';
 import { articlePath, jsonLd, links } from '../apps/web/src/seo';
 import { providers } from '../packages/providers/src';
+
+test('Google Cloud translates through v2 with a header key and maps Chinese script locales', async (context) => {
+  context.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(url, 'https://translation.googleapis.com/language/translate/v2');
+    assert.equal(new Headers(options.headers).get('x-goog-api-key'), 'google-test');
+    assert.deepEqual(JSON.parse(String(options.body)), {
+      q: ['Hello'],
+      source: 'en',
+      target: 'zh-TW',
+      format: 'text',
+    });
+    return Response.json({ data: { translations: [{ translatedText: '你好' }] } });
+  });
+  assert.deepEqual(
+    await providers.google_cloud.translate(
+      { text: ['Hello'], source: 'en-US', target: 'zh-Hant' },
+      'google-test',
+    ),
+    ['你好'],
+  );
+});
+
+test('Gemini requests structured translations with the configured model', async (context) => {
+  context.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(
+      url,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
+    );
+    assert.equal(new Headers(options.headers).get('x-goog-api-key'), 'gemini-test');
+    assert.equal(JSON.parse(String(options.body)).generationConfig.responseMimeType, 'application/json');
+    return Response.json({
+      candidates: [
+        {
+          finishReason: 'STOP',
+          content: {
+            parts: [{ thought: true, text: 'Ignore this part' }, { text: '{"translations":["Bonjour"]}' }],
+          },
+        },
+      ],
+    });
+  });
+  assert.deepEqual(
+    await providers.gemini.translate({ text: ['Hello'], source: 'en', target: 'fr' }, 'gemini-test'),
+    ['Bonjour'],
+  );
+});
+
+test('OpenAI requests structured output and rejects a result with missing translations', async (context) => {
+  const batch = { text: ['Hello'], source: 'en', target: 'fr' };
+  let translated = ['Bonjour'];
+  context.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(url, 'https://api.openai.com/v1/responses');
+    assert.equal(new Headers(options.headers).get('authorization'), 'Bearer openai-test');
+    const request = JSON.parse(String(options.body));
+    assert.equal(request.model, 'configured-model');
+    assert.equal(request.text.format.type, 'json_schema');
+    assert.equal(request.store, false);
+    return Response.json({
+      status: 'completed',
+      output: [
+        { type: 'reasoning' },
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: JSON.stringify({ translations: translated }) }],
+        },
+      ],
+    });
+  });
+  assert.deepEqual(await providers.openai.translate(batch, 'openai-test', 'configured-model'), ['Bonjour']);
+  translated = [];
+  await assert.rejects(
+    () => providers.openai.translate(batch, 'openai-test', 'configured-model'),
+    /openai_invalid_response/,
+  );
+});
 import {
   decryptProviderCredential,
   encryptProviderCredential,

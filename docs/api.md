@@ -17,7 +17,8 @@ The API is same-origin with the built admin client. Routes use JSON except healt
 | `POST /api/v1/languages` | Translation manager, admin, or Super Admin | Register a language name and locale code. |
 | `GET /api/v1/domain-options` | Translation manager, admin, or Super Admin | Return languages and groups for domain forms. |
 | `POST /api/v1/groups`, `PATCH /api/v1/groups/:id` | Translation manager, admin, or Super Admin | Save name, description, daily limit, priority, enablement, and provider routing. |
-| `PATCH /api/v1/providers/:id` | Translation manager, admin, or Super Admin | Save enablement and estimated rupee cost per million characters. Admins can also submit a write-only `api_key` for DeepL. |
+| `POST /api/v1/providers` | Admin or Super Admin | Add a named provider, using `deepl`, `google_cloud`, `gemini`, or `openai` as the adapter. |
+| `PATCH /api/v1/providers/:id` | Translation manager, admin, or Super Admin | Save enablement, model where applicable, and estimated rupee cost per million characters. Admins can update the write-only `api_key`. |
 
 Domain fields are `hostname`, `origin`, `language_id`, `group_id`, `daily_limit` (nullable to inherit from the group), `timezone`, `enabled`, `sitemap_enabled`, `rss_enabled`, and `manual_approval`.
 

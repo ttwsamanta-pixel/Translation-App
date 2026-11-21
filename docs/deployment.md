@@ -22,7 +22,7 @@ Point the admin hostname at the VPS. Use `systemctl show caddy -p ExecStart` to 
 
 Open the admin hostname over HTTPS and sign in. Add missing locale codes under **Languages → Add language**, then register your existing hostnames under **Domains → Add domain**. Set Public origin to the exact existing HTTPS origin, including `www` when appropriate. Add Caddy routes for public domains and switch their DNS only when you are ready to migrate their traffic. Follow the WordPress connector setup in the README to send one test article. For later updates, pull the release and run the same Compose command. Check the setup container's logs if migrations or seeding fail.
 
-Save the translation key under **Providers (APIs) → DeepL → Edit** before sending articles. Keep `PROVIDER_CREDENTIAL_SECRET` in the protected configuration backup alongside the database backup. For an existing deployment, rerun `bash deployment/prepare-vps.sh` to add this secret to the existing `.env.vps`. The admin and API serve `X-Robots-Tag: noindex`. The public sites retain their published article indexing rules.
+Save a translation key under **Providers (APIs)**, enable that provider, and select it for the appropriate group before sending articles. Keep `PROVIDER_CREDENTIAL_SECRET` in the protected configuration backup alongside the database backup. For an existing deployment, rerun `bash deployment/prepare-vps.sh` to add this secret to the existing `.env.vps`. The admin and API serve `X-Robots-Tag: noindex`. The public sites retain their published article indexing rules.
 
 ## Install directly with Nginx and PM2
 
@@ -70,4 +70,4 @@ Run the seed once for initial setup, or repeat it to insert missing reference ro
 | Implemented | Central API and schema, WordPress connector, configurable domains, admin role checks, job pipeline, DeepL and local mock, basic fallback and retry, translation memory, review and publishing controls, shared SSR, and localized metadata. |
 | Partial | Roles are preset. Administration supports domain and group settings, provider pricing and enablement, and job actions. Public rendering covers listings and article pages. Provider usage estimates are in INR. |
 | External configuration | WordPress installation and source test, a real DeepL API plan and key, VPS, Cloudflare DNS and origin TLS, production backup scheduling, and legacy URL export. |
-| Later rollout | Google Cloud, Gemini, OpenAI, encrypted provider credential management, provider-specific throttles and budget enforcement, advanced taxonomy/media tools, full site templates, and staged onboarding of remaining domains. |
+| Later rollout | Additional adapters such as Azure and Amazon Translate, provider-specific throttles and budget enforcement, advanced taxonomy/media tools, full site templates, and staged onboarding of remaining domains. |

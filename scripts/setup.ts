@@ -3,6 +3,7 @@ import { database, execute, rows } from '../packages/database/src/db';
 import { production, required } from '../packages/shared/src/config';
 import { normalizeHost } from '../packages/shared/src/article';
 import { passwordHash } from '../packages/shared/src/auth';
+import { providerCatalog, providerKinds } from '../packages/shared/src/provider-catalog';
 
 async function migrate() {
   const conn = await database().getConnection();
@@ -57,18 +58,27 @@ async function seed() {
     passwordHash(password),
   ]);
   await execute("INSERT IGNORE INTO languages (code,name) VALUES ('fr-FR','French')");
-  await execute(
-    'INSERT IGNORE INTO translation_providers (name,adapter,cost_inr_per_million) VALUES (?,?,?)',
-    ['DeepL', 'deepl', Number(process.env.DEEPL_COST_INR_PER_MILLION ?? 0)],
-  );
+  for (const kind of providerKinds) {
+    const { name, defaultModel } = providerCatalog[kind];
+    await execute(
+      'INSERT IGNORE INTO translation_providers (name,adapter,model,enabled,cost_inr_per_million) VALUES (?,?,?,?,?)',
+      [
+        name,
+        kind,
+        defaultModel,
+        kind === 'deepl',
+        kind === 'deepl' ? Number(process.env.DEEPL_COST_INR_PER_MILLION ?? 0) : 0,
+      ],
+    );
+  }
   if (mock) {
     await execute(
       "INSERT IGNORE INTO translation_providers (name,adapter) VALUES ('Development Mock','mock')",
     );
   }
   await execute(
-    "INSERT IGNORE INTO translation_groups (name,description,daily_limit,provider_id) SELECT 'Premium','Pilot French publishing',100,id FROM translation_providers WHERE adapter=?",
-    [mock ? 'mock' : 'deepl'],
+    "INSERT IGNORE INTO translation_groups (name,description,daily_limit,provider_id) SELECT 'Premium','Pilot French publishing',100,id FROM translation_providers WHERE name=?",
+    [mock ? 'Development Mock' : providerCatalog.deepl.name],
   );
   if (pilotHost && pilotOrigin) {
     await execute(

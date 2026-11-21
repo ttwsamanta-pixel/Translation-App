@@ -69,6 +69,19 @@ jobs:
           const saved = (await json('catalog/providers', null, token)).items.find(row => row.id === deepl.id);
           assert.equal(Number(saved.has_stored_key), 1);
           assert.ok(!JSON.stringify(saved).includes('ci-example-key'));
+          const providerList = await json('catalog/providers', null, token);
+          for (const adapter of ['google_cloud', 'gemini', 'openai']) {
+            const provider = providerList.items.find(row => row.adapter === adapter);
+            assert.ok(provider, adapter + ' must be preconfigured');
+            await json('providers/' + provider.id, {enabled:true,cost_inr_per_million:0,api_key:'ci-' + adapter}, token, 'PATCH');
+          }
+          const extra = await json('providers', {
+            name:'OpenAI fallback', adapter:'openai', enabled:true, cost_inr_per_million:0,
+            model:'gpt-5-mini', api_key:'ci-fallback-key'
+          }, token);
+          const current = (await json('catalog/providers', null, token)).items;
+          assert.ok(current.every(row => Number(row.has_stored_key) === 1));
+          assert.equal(current.find(row => row.id === extra.id).model,'gpt-5-mini');
           assert.deepEqual((await json('catalog/domains', null, token)).items, []);
           const chinese = await json('languages', {name:'Chinese (Simplified)',code:'zh-hans'}, token);
           assert.equal(chinese.code, 'zh-Hans');
@@ -85,7 +98,7 @@ jobs:
             const assert = require("node:assert/strict");
             const {rows,database} = require("./dist/packages/database/src/db");
             const {decryptProviderCredential,providerCredentialEncryptionKey} = require("./dist/packages/shared/src/provider-credentials");
-            rows("SELECT provider_id,encrypted_key FROM provider_credentials").then(([row]) => {
+            rows("SELECT p.adapter,c.provider_id,c.encrypted_key FROM provider_credentials c JOIN translation_providers p ON p.id=c.provider_id WHERE p.adapter=?",["deepl"]).then(([row]) => {
               assert.ok(!row.encrypted_key.includes("ci-example-key"));
               assert.equal(decryptProviderCredential(row.encrypted_key,providerCredentialEncryptionKey(),row.provider_id),"ci-example-key");
             }).catch(error => { console.error(error.message); process.exitCode = 1; }).finally(() => database().end());

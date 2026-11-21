@@ -9,7 +9,13 @@ import {
 import { providers, ProviderError } from '../../../packages/providers/src';
 import { Work } from '../../../packages/shared/src/queue';
 
-type Provider = { id: number; adapter: string; cost_inr_per_million: string; encrypted_key: string | null };
+type Provider = {
+  id: number;
+  adapter: string;
+  model: string | null;
+  cost_inr_per_million: string;
+  encrypted_key: string | null;
+};
 type Task = {
   id: number;
   article_id: number;
@@ -26,6 +32,7 @@ type Task = {
 
 async function translate(provider: Provider, task: Task, input: string[], fallback: boolean) {
   const adapter = providers[provider.adapter];
+  const maxBatchBytes = adapter?.maxBatchBytes ?? 110_000;
   let credential: string | undefined;
   if (provider.encrypted_key) {
     const encryptionKey = providerCredentialEncryptionKey();
@@ -37,12 +44,13 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
     }
   }
   const output = new Map<string, string>();
+  const memoryHash = (text: string) => sha256(provider.model ? provider.model + '\0' + text : text);
   const missing: string[] = [];
   for (const text of new Set(input.filter(Boolean))) {
     const [memory] = await rows<{ translated_text: string }>(
       `SELECT translated_text FROM translation_memory
       WHERE source_hash=? AND source_language=? AND target_language=? AND provider_id=?`,
-      [sha256(text), task.payload.language, task.code, provider.id],
+      [memoryHash(text), task.payload.language, task.code, provider.id],
     );
     if (memory) output.set(text, memory.translated_text);
     else missing.push(text);
@@ -53,8 +61,8 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
     while (index < missing.length && batch.length < 50) {
       const text = missing[index];
       const size = Buffer.byteLength(JSON.stringify(text)) + 1;
-      if (batch.length && bytes + size > 110_000) break;
-      if (size > 110_000) throw new ProviderError('segment_too_large', false);
+      if (batch.length && bytes + size > maxBatchBytes) break;
+      if (size > maxBatchBytes) throw new ProviderError('segment_too_large');
       bytes += size;
       batch.push(text);
       index++;
@@ -67,6 +75,7 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
       translated = await adapter.translate(
         { text: batch, source: task.payload.language, target: task.code },
         credential,
+        provider.model ?? undefined,
       );
     } finally {
       await execute(
@@ -90,7 +99,7 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
         await execute(
           `INSERT IGNORE INTO translation_memory
           (source_hash,source_language,target_language,provider_id,translated_text) VALUES (?,?,?,?,?)`,
-          [sha256(text), task.payload.language, task.code, provider.id, segments[i]],
+          [memoryHash(text), task.payload.language, task.code, provider.id, segments[i]],
           conn,
         );
       }
@@ -135,7 +144,7 @@ export async function runJob(job: Job<Work>) {
       ...parts.segments,
     ];
     const available = await rows<Provider>(
-      `SELECT p.id,p.adapter,p.cost_inr_per_million,c.encrypted_key FROM translation_providers p
+      `SELECT p.id,p.adapter,p.model,p.cost_inr_per_million,c.encrypted_key FROM translation_providers p
        LEFT JOIN provider_credentials c ON c.provider_id=p.id WHERE p.enabled=1 AND p.id IN (?,?)`,
       [task.provider_id, task.fallback_provider_id],
     );

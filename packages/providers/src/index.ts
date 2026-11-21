@@ -1,19 +1,9 @@
 import { production } from '../../shared/src/config';
+import { GoogleCloudProvider } from './cloud';
+import { GeminiProvider, OpenAIProvider } from './llm';
+import { postJson, ProviderError, TranslationInput, TranslationProvider, translations } from './http';
 
-export type TranslationInput = { text: string[]; source: string; target: string };
-export interface TranslationProvider {
-  translate(input: TranslationInput, credential?: string): Promise<string[]>;
-  validateConfiguration(credential?: string): boolean;
-}
-
-export class ProviderError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly transient = true,
-  ) {
-    super(code);
-  }
-}
+export { ProviderError } from './http';
 
 class DeepLProvider implements TranslationProvider {
   validateConfiguration(credential?: string) {
@@ -28,38 +18,24 @@ class DeepLProvider implements TranslationProvider {
     const targetLang = ['EN-GB', 'EN-US', 'PT-BR', 'PT-PT', 'ZH-HANS', 'ZH-HANT', 'ES-419'].includes(upper)
       ? upper
       : upper.split('-')[0];
-    const body = JSON.stringify({
+    const body = {
       text,
       source_lang: source.split('-')[0].toUpperCase(),
       target_lang: targetLang,
-    });
-    if (Buffer.byteLength(body) > 125_000) throw new ProviderError('segment_too_large', false);
-    let response: Response;
-    try {
-      response = await fetch(`${origin}/v2/translate`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(25_000),
-        redirect: 'error',
-        headers: { Authorization: `DeepL-Auth-Key ${key}`, 'Content-Type': 'application/json' },
-        body,
-      });
-    } catch {
-      throw new ProviderError('deepl_network');
-    }
-    if (!response.ok)
-      throw new ProviderError(`deepl_http_${response.status}`, ![400, 413, 414].includes(response.status));
-    const data = (await response.json().catch(() => null)) as { translations?: { text?: unknown }[] } | null;
-    const output = Array.isArray(data?.translations)
-      ? data.translations.map((entry) => entry?.text)
-      : undefined;
-    if (
-      !output ||
-      output.length !== text.length ||
-      !output.every((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-    ) {
-      throw new ProviderError('deepl_invalid_response');
-    }
-    return output;
+    };
+    if (Buffer.byteLength(JSON.stringify(body)) > 125_000)
+      throw new ProviderError('segment_too_large', false);
+    const data = await postJson<{ translations?: { text?: unknown }[] }>(
+      'deepl',
+      `${origin}/v2/translate`,
+      { Authorization: `DeepL-Auth-Key ${key}` },
+      body,
+    );
+    return translations(
+      'deepl',
+      Array.isArray(data.translations) ? data.translations.map((entry) => entry?.text) : undefined,
+      text.length,
+    );
   }
 }
 
@@ -76,5 +52,8 @@ class MockProvider implements TranslationProvider {
 
 export const providers: Record<string, TranslationProvider> = {
   deepl: new DeepLProvider(),
+  google_cloud: new GoogleCloudProvider(),
+  gemini: new GeminiProvider(),
+  openai: new OpenAIProvider(),
   mock: new MockProvider(),
 };

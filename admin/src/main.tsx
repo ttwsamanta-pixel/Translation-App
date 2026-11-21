@@ -26,6 +26,12 @@ import {
   X,
 } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
+import {
+  isProviderKind,
+  providerCatalog,
+  providerKinds,
+  type ProviderKind,
+} from '../../packages/shared/src/provider-catalog';
 import { Badge, Dashboard, Panel, Table, Usage } from './dashboard';
 import { dateLabel, demoLists, demoOverview, label, money, number, Overview, Row } from './data';
 import './style.css';
@@ -102,7 +108,7 @@ const columns: Record<string, [string, string][]> = {
   ],
   providers: [
     ['name', 'Provider'],
-    ['adapter', 'Model / Type'],
+    ['model', 'Model / Type'],
     ['cost_inr_per_million', 'INR / million characters'],
     ['has_stored_key', 'API key'],
     ['enabled', 'Status'],
@@ -656,7 +662,10 @@ function Catalog({
     if (key.endsWith('enabled')) return <Badge state={String(Boolean(value))} />;
     if (key.endsWith('_at')) return dateLabel(value);
     if (key === 'cost_inr_per_million') return money(value);
-    if (key === 'has_stored_key') return row.adapter === 'deepl' ? (value ? 'Saved' : 'No key saved') : '—';
+    if (key === 'model')
+      return value ?? (isProviderKind(row.adapter) ? providerCatalog[row.adapter].name : row.adapter);
+    if (key === 'has_stored_key')
+      return isProviderKind(row.adapter) ? (value ? 'Saved' : 'No key saved') : '—';
     if (key === 'role') return label(String(value));
     if (key === 'title' && page === 'articles')
       return (
@@ -761,6 +770,12 @@ function Catalog({
           <button className="primary add" onClick={() => setConfiguration({})}>
             <Plus size={16} />
             Add group
+          </button>
+        )}
+        {page === 'providers' && (demo || ['super_admin', 'admin'].includes(session?.role ?? '')) && (
+          <button className="primary add" onClick={() => setConfiguration({})}>
+            <Plus size={16} />
+            Add provider
           </button>
         )}
         {page === 'languages' && canManage && (
@@ -938,7 +953,11 @@ function ConfigurationForm({
   onSave: (value: Row) => void;
 }) {
   const isGroup = kind === 'groups';
-  const canSaveKey = !isGroup && row.adapter === 'deepl' && allowCredential;
+  const creatingProvider = !isGroup && !row.id;
+  const [providerKind, setProviderKind] = useState<ProviderKind>('deepl');
+  const adapter = creatingProvider ? providerKind : row.adapter;
+  const providerInfo = isProviderKind(adapter) ? providerCatalog[adapter] : undefined;
+  const canSaveKey = !isGroup && !!providerInfo && allowCredential;
   const [providers, setProviders] = useState<Row[]>(demo ? demoLists.providers : []);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -964,7 +983,12 @@ function ConfigurationForm({
           provider_id: Number(form.get('provider_id')),
           fallback_provider_id: Number(form.get('fallback_provider_id')) || null,
         }
-      : { enabled, cost_inr_per_million: Number(form.get('cost_inr_per_million')) };
+      : {
+          enabled,
+          cost_inr_per_million: Number(form.get('cost_inr_per_million')),
+          ...(creatingProvider ? { adapter: providerKind, name: String(form.get('name')).trim() } : {}),
+          ...(providerInfo?.defaultModel ? { model: String(form.get('model')).trim() } : {}),
+        };
     try {
       if ('provider_id' in value && value.provider_id === value.fallback_provider_id)
         throw new Error('Choose a different fallback provider.');
@@ -998,7 +1022,7 @@ function ConfigurationForm({
       <section className="panel dialog" role="dialog" aria-labelledby="config-title">
         <header className="panel-heading">
           {isGroup ? <Waypoints /> : <Bot />}
-          <h2 id="config-title">{isGroup ? (row.id ? 'Edit group' : 'Add group') : `Edit ${row.name}`}</h2>
+          <h2 id="config-title">{row.id ? `Edit ${row.name}` : isGroup ? 'Add group' : 'Add provider'}</h2>
           <button className="dialog-close icon-button" onClick={onClose} aria-label="Close">
             <X />
           </button>
@@ -1067,18 +1091,55 @@ function ConfigurationForm({
               </label>
             </>
           ) : (
-            <label className="wide">
-              Estimated INR / million characters
-              <input
-                name="cost_inr_per_million"
-                type="number"
-                min="0"
-                step=".0001"
-                max="9999999"
-                required
-                defaultValue={String(row.cost_inr_per_million ?? 0)}
-              />
-            </label>
+            <>
+              {creatingProvider && (
+                <>
+                  <label>
+                    Provider type
+                    <select
+                      value={providerKind}
+                      onChange={(event) => {
+                        if (isProviderKind(event.target.value)) setProviderKind(event.target.value);
+                      }}
+                    >
+                      {providerKinds.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {providerCatalog[kind].name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Display name
+                    <input name="name" maxLength={100} placeholder="e.g. French fallback" required />
+                  </label>
+                </>
+              )}
+              {providerInfo?.defaultModel && (
+                <label className="wide">
+                  Model
+                  <input
+                    key={String(adapter)}
+                    name="model"
+                    defaultValue={String(row.model ?? providerInfo.defaultModel)}
+                    maxLength={120}
+                    required
+                  />
+                </label>
+              )}
+              <label className="wide">
+                Estimated INR / million characters
+                <input
+                  name="cost_inr_per_million"
+                  type="number"
+                  min="0"
+                  step=".0001"
+                  max="9999999"
+                  required
+                  defaultValue={String(row.cost_inr_per_million ?? 0)}
+                />
+              </label>
+            </>
           )}
           <label className="check wide">
             <input type="checkbox" name="enabled" defaultChecked={Boolean(row.enabled ?? true)} />
@@ -1086,14 +1147,14 @@ function ConfigurationForm({
           </label>
           {canSaveKey && (
             <label className="wide">
-              DeepL API key
+              {providerInfo?.name} API key
               <input
                 name="api_key"
                 type="password"
                 autoComplete="new-password"
                 maxLength={512}
                 placeholder={
-                  row.has_stored_key ? 'Enter a new key to replace the saved key' : 'Paste your DeepL API key'
+                  row.has_stored_key ? 'Enter a new key to replace the saved key' : 'Paste your API key'
                 }
               />
             </label>

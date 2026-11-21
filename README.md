@@ -42,7 +42,7 @@ Use `curl.exe -H "Host: fr.ttw.test" http://127.0.0.1:3001/` on Windows to previ
 | `ALLOW_MOCK_TRANSLATION` | Local-only mock when set to `true`. Mock article pages are labelled and excluded from feed, sitemap, and hreflang output. |
 | `WORKER_CONCURRENCY` | Maximum simultaneous translations per worker instance. Defaults to 2. |
 
-Sign in as an admin and save the key under **Providers (APIs) → DeepL → Edit**. The saved key is encrypted at rest and takes precedence over the optional environment key. To switch a pilot from mock to DeepL, run the current seed to ensure the provider is registered, then edit the Premium group in **Translation Groups**. Existing jobs retain their selected provider. [DeepL API authentication and endpoints](https://developers.deepl.com/docs/getting-started/auth)
+Sign in as an admin and open **Providers (APIs)**. Edit the preconfigured DeepL, Google Cloud Translation Basic v2, Gemini, or OpenAI provider, or choose **Add provider** for a separate key or model. Save the API key and enable the provider. Configure its primary or fallback role in **Translation Groups**. Keys are encrypted at rest. Saved DeepL keys take precedence over the optional environment key. Existing jobs retain their selected provider. The dashboard shows an estimate based on the rate you enter per million source characters. The Gemini and OpenAI API bills are based on token usage and may differ.
 
 ### Project layout
 
