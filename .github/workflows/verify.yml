@@ -38,13 +38,41 @@ jobs:
           ALLOW_MOCK_TRANSLATION: 'true'
           ADMIN_EMAIL: admin@example.test
           SOURCE_HOST: wordpress.example
-          PILOT_HOST: fr.ttw.test
-          PILOT_ORIGIN: http://fr.ttw.test:8201
         run: |
           bash deployment/prepare-vps.sh
           docker compose --env-file .env.vps -f compose.vps.yaml up -d --build --wait
           curl -fsS http://127.0.0.1:8200/ready
-          curl -fsS -H 'Host: fr.ttw.test' http://127.0.0.1:8201/ | grep -F 'Dernières actualités'
+          node --env-file=.env.vps --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const root = 'http://127.0.0.1:8200/api/v1/';
+          const json = async (path, body, token) => {
+            const response = await fetch(root + path, {
+              method: body ? 'POST' : 'GET',
+              headers: {
+                ...(body && {'Content-Type':'application/json'}),
+                ...(token && {Authorization:'Bearer ' + token})
+              },
+              body: body ? JSON.stringify(body) : undefined
+            });
+            assert.ok(response.ok, path + ' returned ' + response.status);
+            return response.json();
+          };
+          const {token} = await json('auth/login', {
+            email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD
+          });
+          assert.deepEqual((await json('catalog/domains', null, token)).items, []);
+          const chinese = await json('languages', {name:'Chinese (Simplified)',code:'zh-hans'}, token);
+          assert.equal(chinese.code, 'zh-Hans');
+          const {groups, languages} = await json('domain-options', null, token);
+          assert.ok(languages.some(language => language.id === chinese.id));
+          await json('domains', {
+            hostname:'www.fr.ttw.test', origin:'https://www.fr.ttw.test',
+            language_id:languages.find(language => language.code === 'fr-FR').id,
+            group_id:groups[0].id, daily_limit:null, timezone:'Europe/Paris',
+            enabled:true, sitemap_enabled:true, rss_enabled:true, manual_approval:true
+          }, token);
+          NODE
+          curl -fsS -H 'Host: www.fr.ttw.test' http://127.0.0.1:8201/ | grep -F 'Dernières actualités'
       - name: View logs on failure
         if: failure()
         run: |

@@ -11,16 +11,16 @@ bash deployment/prepare-vps.sh
 nano .env.vps
 ```
 
-Fill in `ADMIN_EMAIL`, `SOURCE_HOST` (the WordPress hostname), `PILOT_HOST` (the French hostname), `PILOT_ORIGIN` (the matching HTTPS origin without a trailing slash), and `DEEPL_API_KEY`. Use the generated `ADMIN_PASSWORD` on the sign-in page. The database password is generated as hex so it can be used in the connection URI. The seed and migrations run as a one-shot container before the application starts.
+Fill in `ADMIN_EMAIL`, `SOURCE_HOST` (the WordPress hostname), and `DEEPL_API_KEY`. Use the generated `ADMIN_PASSWORD` on the sign-in page. The database password is generated as hex so it can be used in the connection URI. The seed and migrations run as a one-shot container before the application starts. Leave `PILOT_HOST` and `PILOT_ORIGIN` unset when you plan to add your existing domains in the admin dashboard.
 
 ```sh
 docker compose --env-file .env.vps -f compose.vps.yaml up -d --build --wait
 curl -fsS http://127.0.0.1:8200/ready
 ```
 
-Create DNS records for the admin and French hostnames pointing at the VPS. Use `systemctl show caddy -p ExecStart` to identify the active Caddy configuration. Add the two hostname blocks from `deployment/Caddyfile.example` to that configuration, with the real names and any port overrides from `.env.vps`. For a standard Caddyfile at `/etc/caddy/Caddyfile`, validate it with `caddy validate --config /etc/caddy/Caddyfile`, then run `systemctl reload caddy`. Use the existing site's DNS and certificate workflow.
+Point the admin hostname at the VPS. Use `systemctl show caddy -p ExecStart` to identify the active Caddy configuration. Add the admin hostname block from `deployment/Caddyfile.example` with the real name and any port override from `.env.vps`. For a standard Caddyfile at `/etc/caddy/Caddyfile`, validate it with `caddy validate --config /etc/caddy/Caddyfile`, then run `systemctl reload caddy`. Use the existing site's DNS and certificate workflow.
 
-Open the admin hostname over HTTPS and sign in. Follow the WordPress connector setup in the README to send one test article. For later updates, pull the release and run the same Compose command. Check the setup container's logs if migrations or seeding fail.
+Open the admin hostname over HTTPS and sign in. Add missing locale codes under **Languages → Add language**, then register your existing hostnames under **Domains → Add domain**. Set Public origin to the exact existing HTTPS origin, including `www` when appropriate. Add Caddy routes for public domains and switch their DNS only when you are ready to migrate their traffic. Follow the WordPress connector setup in the README to send one test article. For later updates, pull the release and run the same Compose command. Check the setup container's logs if migrations or seeding fail.
 
 ## Install directly with Nginx and PM2
 

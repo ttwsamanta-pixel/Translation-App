@@ -37,14 +37,19 @@ async function seed() {
   const password = required('ADMIN_PASSWORD');
   if (password.length < 12 || (production && password.startsWith('replace-')))
     throw new Error('Set a strong ADMIN_PASSWORD');
-  const hostname = normalizeHost(required('PILOT_HOST'));
-  const origin = new URL(required('PILOT_ORIGIN'));
-  if (
-    normalizeHost(origin.hostname) !== hostname ||
-    origin.origin !== required('PILOT_ORIGIN') ||
-    (production ? origin.protocol !== 'https:' : !['http:', 'https:'].includes(origin.protocol))
-  ) {
-    throw new Error('PILOT_ORIGIN must be an origin matching PILOT_HOST');
+  const pilotHost = process.env.PILOT_HOST?.trim();
+  const pilotOrigin = process.env.PILOT_ORIGIN?.trim();
+  if (pilotHost || pilotOrigin) {
+    if (!pilotHost || !pilotOrigin)
+      throw new Error('Set both PILOT_HOST and PILOT_ORIGIN, or leave both blank');
+    const origin = new URL(pilotOrigin);
+    if (
+      normalizeHost(origin.hostname) !== normalizeHost(pilotHost) ||
+      origin.origin !== pilotOrigin ||
+      (production ? origin.protocol !== 'https:' : !['http:', 'https:'].includes(origin.protocol))
+    ) {
+      throw new Error('PILOT_ORIGIN must be an origin matching PILOT_HOST');
+    }
   }
   const mock = !production && process.env.ALLOW_MOCK_TRANSLATION === 'true' && !process.env.DEEPL_API_KEY;
   if (!mock && !process.env.DEEPL_API_KEY) throw new Error('Set DEEPL_API_KEY or enable the local mock');
@@ -65,11 +70,14 @@ async function seed() {
     "INSERT IGNORE INTO translation_groups (name,description,daily_limit,provider_id) SELECT 'Premium','Pilot French publishing',100,id FROM translation_providers WHERE adapter=?",
     [mock ? 'mock' : 'deepl'],
   );
-  await execute(
-    "INSERT IGNORE INTO domains (hostname,origin,language_id,group_id) SELECT ?,?,l.id,g.id FROM languages l CROSS JOIN translation_groups g WHERE l.code='fr-FR' AND g.name='Premium'",
-    [hostname, origin.origin],
-  );
-  console.log(`Pilot domain configured for ${hostname}`);
+  if (pilotHost && pilotOrigin) {
+    await execute(
+      "INSERT IGNORE INTO domains (hostname,origin,language_id,group_id) SELECT ?,?,l.id,g.id FROM languages l CROSS JOIN translation_groups g WHERE l.code='fr-FR' AND g.name='Premium'",
+      [normalizeHost(pilotHost), pilotOrigin],
+    );
+    console.log(`Pilot domain configured for ${pilotHost}`);
+  }
+  console.log('Admin setup complete');
 }
 
 (process.argv[2] === 'migrate' ? migrate() : seed())

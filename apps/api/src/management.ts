@@ -73,6 +73,21 @@ const providerSchema = z.object({
   enabled: z.boolean(),
   cost_inr_per_million: z.number().min(0).max(9_999_999),
 });
+const languageSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  code: z
+    .string()
+    .trim()
+    .max(16)
+    .transform((value, context) => {
+      try {
+        return Intl.getCanonicalLocales(value)[0];
+      } catch {
+        context.addIssue({ code: 'custom', message: 'Enter a language code such as fr-FR or zh-Hans' });
+        return z.NEVER;
+      }
+    }),
+});
 const domainSchema = z
   .object({
     hostname: z
@@ -318,6 +333,32 @@ export class AdminController {
       }
       return { changed: false };
     });
+  }
+
+  @Post('languages')
+  async addLanguage(@Req() request: Request, @Body() body: unknown) {
+    await authorize(request, managers);
+    const { name, code } = parse(languageSchema, body);
+    try {
+      const result = await execute('INSERT INTO languages (name,code) VALUES (?,?)', [name, code]);
+      return { id: result.insertId, name, code };
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+        throw new ConflictException('This language code is already registered');
+      }
+      throw error;
+    }
+  }
+
+  @Get('domain-options')
+  async domainOptions(@Req() request: Request) {
+    await authorize(request, managers);
+    const [languages, groups] = await Promise.all([
+      rows('SELECT id,name,code FROM languages ORDER BY name,code'),
+      rows(`SELECT g.id,g.name,g.daily_limit,p.name provider FROM translation_groups g
+        JOIN translation_providers p ON p.id=g.provider_id ORDER BY g.name`),
+    ]);
+    return { languages, groups };
   }
 
   @Post('domains')

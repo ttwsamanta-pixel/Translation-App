@@ -17,7 +17,7 @@ Open http://127.0.0.1:5173/. The development server starts with labelled sample 
 
 1. Copy `.env.example` to `.env` and choose a local admin password and three independent secrets. Use `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` once per secret. Set `SOURCE_HOST` to the WordPress hostname when connecting a site.
 2. Run `docker compose up -d --wait` for MySQL 8.4 and Redis. If you have your own local services, set their connection URLs in `.env`.
-3. Run `npm run migrate` and `npm run seed`. The seed creates the admin account, French language, Premium group, and one domain. It preserves existing records. Use the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` to sign in.
+3. Run `npm run migrate` and `npm run seed`. The seed creates the admin account, French language, and Premium group. It creates the optional pilot domain when both pilot variables are set and preserves existing records. Use the configured `ADMIN_EMAIL` and `ADMIN_PASSWORD` to sign in.
 4. Run `npm run dev:api`, `npm run dev:worker`, and `npm run dev:web` in separate terminals. Keep `npm run dev` running for the development admin UI. The Vite proxy targets port 3000.
 5. Run `npm run smoke` in another terminal against a fresh one-domain setup. This sends a signed fixture through the API, waits for BullMQ publishing, checks the public site and dashboard API, and withdraws the test article.
 
@@ -32,7 +32,7 @@ Use `curl.exe -H "Host: fr.ttw.test" http://127.0.0.1:3001/` on Windows to previ
 | `REDIS_URL` | BullMQ, API rate limits, and worker heartbeat. |
 | `API_PORT`, `WEB_PORT`, `BIND_HOST` | Defaults are 3000, 3001, and loopback. |
 | `SOURCE_HOST` | Allowed WordPress hostname, without protocol or path. |
-| `PILOT_HOST`, `PILOT_ORIGIN` | Domain record seeded for the French pilot. Set the production origin to the exact HTTPS canonical origin. |
+| `PILOT_HOST`, `PILOT_ORIGIN` | Optional automated pilot domain seed. Leave both unset for domain registration through the admin dashboard. |
 | `WEBHOOK_API_KEY`, `WEBHOOK_SECRET` | Independent credentials shared with the WordPress connector. Each requires at least 32 characters. |
 | `JWT_SECRET` | Independent random admin signing secret of at least 32 characters. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Initial Super Admin account. Password requires at least 12 characters. Rerunning the seed does not change an existing password. |

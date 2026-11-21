@@ -560,6 +560,7 @@ function Catalog({
   const [more, setMore] = useState(false);
   const [error, setError] = useState('');
   const [domain, setDomain] = useState<Row>();
+  const [addingLanguage, setAddingLanguage] = useState(false);
   const [configuration, setConfiguration] = useState<Row>();
   const [article, setArticle] = useState<Row>();
   const [tick, setTick] = useState(0);
@@ -760,6 +761,12 @@ function Catalog({
             Add group
           </button>
         )}
+        {page === 'languages' && canManage && (
+          <button className="primary add" onClick={() => setAddingLanguage(true)}>
+            <Plus size={16} />
+            Add language
+          </button>
+        )}
       </div>
       {error && (
         <p role="alert" className="form-error">
@@ -788,6 +795,7 @@ function Catalog({
         <DomainForm
           row={domain}
           demo={demo}
+          previewLists={previewLists}
           token={session?.token}
           onClose={() => setDomain(undefined)}
           onSave={(record) => {
@@ -795,6 +803,21 @@ function Catalog({
             setDomain(undefined);
             setTick((n) => n + 1);
             notice(demo ? 'Domain updated in this preview.' : 'Domain configuration saved.');
+          }}
+        />
+      )}
+      {addingLanguage && (
+        <LanguageForm
+          demo={demo}
+          token={session?.token}
+          onClose={() => setAddingLanguage(false)}
+          onSave={(record) => {
+            if (demo) savePreview('languages', record);
+            setAddingLanguage(false);
+            setQuery('');
+            setOffset(1);
+            setTick((n) => n + 1);
+            notice('Language added. You can now select it when adding a domain.');
           }}
         />
       )}
@@ -820,6 +843,78 @@ function Catalog({
 function savePreviewRow(all: Row[], record: Row) {
   if (record.id) return all.map((item) => (item.id === record.id ? record : item));
   return [...all, { ...record, id: Math.max(0, ...all.map((row) => Number(row.id))) + 1 }];
+}
+
+function LanguageForm({
+  demo,
+  token,
+  onClose,
+  onSave,
+}: {
+  demo: boolean;
+  token?: string;
+  onClose: () => void;
+  onSave: (record: Row) => void;
+}) {
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setSaving(true);
+    const values = new FormData(event.currentTarget);
+    const name = String(values.get('name')).trim();
+    try {
+      const code = Intl.getCanonicalLocales(String(values.get('code')).trim())[0];
+      if (!demo) await api('languages', token, 'POST', { name, code });
+      onSave({ name, code });
+    } catch (error) {
+      setError(
+        error instanceof RangeError
+          ? 'Enter a language code such as fr-FR or zh-Hans.'
+          : (error as Error).message,
+      );
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="overlay">
+      <section className="dialog panel" role="dialog" aria-labelledby="language-title">
+        <header className="panel-heading">
+          <Languages />
+          <h2 id="language-title">Add language</h2>
+          <button className="dialog-close icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </header>
+        <form className="domain-form" onSubmit={save}>
+          <label>
+            Language name
+            <input name="name" placeholder="Chinese (Simplified)" maxLength={80} required />
+          </label>
+          <label>
+            Locale
+            <input name="code" placeholder="zh-Hans" maxLength={16} required />
+          </label>
+          {error && (
+            <p className="form-error wide" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="form-actions wide">
+            <button className="secondary" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary" disabled={saving}>
+              Add language
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
 function ConfigurationForm({
@@ -999,26 +1094,28 @@ function ConfigurationForm({
 function DomainForm({
   row,
   demo,
+  previewLists,
   token,
   onClose,
   onSave,
 }: {
   row: Row;
   demo: boolean;
+  previewLists: Record<string, Row[]>;
   token?: string;
   onClose: () => void;
   onSave: (value: Row) => void;
 }) {
-  const [languages, setLanguages] = useState<Row[]>(demo ? demoLists.languages : []);
-  const [groups, setGroups] = useState<Row[]>(demo ? demoLists.groups : []);
+  const [languages, setLanguages] = useState<Row[]>(demo ? previewLists.languages : []);
+  const [groups, setGroups] = useState<Row[]>(demo ? previewLists.groups : []);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (demo) return;
-    Promise.all(['languages', 'groups'].map((name) => api<{ items: Row[] }>('catalog/' + name, token)))
-      .then(([lang, group]) => {
-        setLanguages(lang.items);
-        setGroups(group.items);
+    api<{ languages: Row[]; groups: Row[] }>('domain-options', token)
+      .then((data) => {
+        setLanguages(data.languages);
+        setGroups(data.groups);
       })
       .catch((err) => setError(err.message));
   }, [demo, token]);

@@ -14,6 +14,8 @@ The API is same-origin with the built admin client. Routes use JSON except healt
 | `POST /api/v1/articles/:id/translate` | Editor or manager | Allocate eligible domains within their limits. Accepts `{}` or `{"domainId":1}`. |
 | `PATCH /api/v1/jobs/:id` | Editor or manager | Accepts an `action` of `retry`, `cancel`, `approve`, or `unpublish`. |
 | `POST /api/v1/domains`, `PATCH /api/v1/domains/:id` | Translation manager, admin, or Super Admin | Create or save a complete domain record. |
+| `POST /api/v1/languages` | Translation manager, admin, or Super Admin | Register a language name and locale code. |
+| `GET /api/v1/domain-options` | Translation manager, admin, or Super Admin | Return languages and groups for domain forms. |
 | `POST /api/v1/groups`, `PATCH /api/v1/groups/:id` | Translation manager, admin, or Super Admin | Save name, description, daily limit, priority, enablement, and provider routing. |
 | `PATCH /api/v1/providers/:id` | Translation manager, admin, or Super Admin | Save enablement and the estimated rupee cost per million characters. |
 
