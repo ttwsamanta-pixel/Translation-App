@@ -1,0 +1,38 @@
+name: Verify pilot
+
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: php -l wordpress-plugin/translation-connector/translation-connector.php
+      - run: docker compose up -d --wait
+      - name: Migrate, seed, and exercise the pilot
+        shell: bash
+        run: |
+          cp .env.example .env
+          npm run migrate
+          npm run seed
+          node dist/apps/api/src/main.js > api.log 2>&1 &
+          node dist/apps/worker/src/main.js > worker.log 2>&1 &
+          node dist/apps/web/src/main.js > web.log 2>&1 &
+          curl --fail --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/ready
+          npm run smoke
+      - name: View logs on failure
+        if: failure()
+        run: |
+          cat api.log worker.log web.log 2>/dev/null || true
+          docker compose logs

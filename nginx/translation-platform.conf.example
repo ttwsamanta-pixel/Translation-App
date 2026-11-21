@@ -1,0 +1,40 @@
+# Place the required certificates and include this file inside nginx's http block.
+# Replace both example hostnames with real Cloudflare DNS names.
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name admin.example.com;
+    ssl_certificate /etc/nginx/tls/admin.example.com.pem;
+    ssl_certificate_key /etc/nginx/tls/admin.example.com.key;
+
+    client_max_body_size 1m;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name fr.example.com;
+    ssl_certificate /etc/nginx/tls/fr.example.com.pem;
+    ssl_certificate_key /etc/nginx/tls/fr.example.com.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
