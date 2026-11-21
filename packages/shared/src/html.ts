@@ -108,3 +108,14 @@ export function rewriteLinks(html: string, source: string, translations: Map<str
     write((path ?? url.href) + suffix);
   });
 }
+
+export function firstImageMatches(html: string, featuredImage: string, source: string) {
+  const $ = load(html, {}, false);
+  const first = $('img[src]').first().attr('src');
+  if (!first) return false;
+  try {
+    return new URL(first, source).href === new URL(featuredImage, source).href;
+  } catch {
+    return false;
+  }
+}

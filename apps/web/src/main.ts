@@ -2,7 +2,8 @@ import express from 'express';
 import helmet from 'helmet';
 import { rows } from '../../../packages/database/src/db';
 import { Article, normalizeHost } from '../../../packages/shared/src/article';
-import { linkTargets, rewriteLinks } from '../../../packages/shared/src/html';
+import { firstImageMatches, linkTargets, rewriteLinks } from '../../../packages/shared/src/html';
+import { publicLabels } from './locale';
 import { articlePath, escape, jsonLd, links } from './seo';
 
 type Domain = {
@@ -69,20 +70,7 @@ const style = `<style>
   .card h2{margin:0}.card a{text-decoration:none}time{color:#526078}.demo{color:#81560d;font-weight:700}footer{max-width:960px;margin:40px auto;padding:0 24px;color:#526078}
 </style>`;
 
-const locale = (domain: Domain) =>
-  domain.code.startsWith('fr')
-    ? {
-        latest: 'Dernières actualités',
-        empty: 'Aucun article publié pour le moment.',
-        demo: 'Contenu de démonstration',
-        feed: 'Flux RSS',
-      }
-    : {
-        latest: 'Latest news',
-        empty: 'No articles have been published yet.',
-        demo: 'Demonstration content',
-        feed: 'RSS feed',
-      };
+const locale = (domain: Domain) => publicLabels(domain.code);
 
 function page(domain: Domain, title: string, main: string, head: string) {
   return `<!doctype html><html lang="${escape(domain.code)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title>${head}${style}</head>
@@ -154,9 +142,10 @@ app.get('/article/:slug', async (request, response: PublicResponse) => {
     ],
   );
   const mapping = new Map(mapped.map((item) => [item.canonical.replace(/\/$/, ''), articlePath(item.slug)]));
-  const image = payload.featuredImage
-    ? `<img class="lead" src="${escape(payload.featuredImage)}" alt="${escape(payload.imageAlt)}" decoding="async">`
-    : '';
+  const image =
+    payload.featuredImage && !firstImageMatches(article.content, payload.featuredImage, payload.canonical)
+      ? `<img class="lead" src="${escape(payload.featuredImage)}" alt="${escape(payload.imageAlt)}" decoding="async">`
+      : '';
   const main = `<article><h1>${escape(article.title)}</h1>${article.mock ? `<p class="demo">${locale(domain).demo}</p>` : ''}
     <p>${escape(payload.author)} · <time datetime="${article.published_at.toISOString()}">${new Intl.DateTimeFormat(domain.code, { dateStyle: 'long', timeZone: 'UTC' }).format(article.published_at)}</time></p>
     ${image}${rewriteLinks(article.content, payload.canonical, mapping)}</article>`;

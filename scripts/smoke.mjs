@@ -19,7 +19,9 @@ const body = JSON.stringify({
   postId,
   sourceHost,
   title: 'European tourism report',
-  content: '<p>Travel news from <a href="/europe">Europe</a>.</p>',
+  content:
+    '<figure><img src="/photos/hero.jpg" alt="Stadium"></figure><p>Travel news from <a href="/europe">Europe</a>.</p>',
+  featuredImage: 'https://' + sourceHost + '/photos/hero.jpg',
   excerpt: 'The latest travel report',
   slug: 'european-tourism-report',
   publishedAt: stamp,
@@ -115,6 +117,7 @@ const html = page.body;
 assert.ok(html.includes('lang="fr-FR"'));
 assert.ok(html.includes(process.env.PILOT_ORIGIN + publicPath));
 assert.match(html, /<h1>.+<\/h1>/);
+assert.equal([...html.matchAll(/<img\b[^>]*src="[^"]*\/photos\/hero\.jpg"/g)].length, 1);
 const overview = await admin('overview', options);
 assert.ok(overview.jobs.some((row) => row.state === 'published'));
 assert.ok(overview.usage.some((row) => Number(row.requests) > 0));

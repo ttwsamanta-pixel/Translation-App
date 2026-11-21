@@ -8,9 +8,27 @@ import {
   normalizeHost,
 } from '../packages/shared/src/article';
 import { signWebhook, verifyWebhook, passwordHash, validPassword } from '../packages/shared/src/auth';
-import { htmlSegments, rewriteLinks } from '../packages/shared/src/html';
+import { firstImageMatches, htmlSegments, rewriteLinks } from '../packages/shared/src/html';
+import { publicLabels } from '../apps/web/src/locale';
 import { articlePath, jsonLd, links } from '../apps/web/src/seo';
 import { providers } from '../packages/providers/src';
+
+test('reuses the first article image when it matches the featured image', () => {
+  const source = 'https://wordpress.example/news/story';
+  const featured = 'https://wordpress.example/photos/hero.jpg';
+  assert.ok(firstImageMatches('<figure><img src="/photos/hero.jpg"></figure>', featured, source));
+  assert.ok(
+    !firstImageMatches('<img src="/photos/other.jpg"><img src="/photos/hero.jpg">', featured, source),
+  );
+  assert.ok(!firstImageMatches('<p>Article without an image</p>', featured, source));
+});
+
+test('uses Armenian page labels for Armenian domains and keeps a fallback for other locales', () => {
+  assert.equal(publicLabels('hy-AM').latest, 'Վերջին նորությունները');
+  assert.equal(publicLabels('hy').feed, 'RSS հոսք');
+  assert.equal(publicLabels('fr-FR').feed, 'Flux RSS');
+  assert.equal(publicLabels('en').latest, 'Latest news');
+});
 
 test('Google Cloud translates through v2 with a header key and maps Chinese script locales', async (context) => {
   context.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
