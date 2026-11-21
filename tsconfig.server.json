@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {"outDir": "dist", "rootDir": "."},
-  "include": ["apps", "packages"]
+  "include": ["apps", "packages", "scripts/setup.ts"]
 }

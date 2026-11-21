@@ -31,8 +31,23 @@ jobs:
           node dist/apps/web/src/main.js > web.log 2>&1 &
           curl --fail --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/ready
           npm run smoke
+      - name: Verify isolated VPS Compose deployment
+        shell: bash
+        env:
+          NODE_ENV: development
+          ALLOW_MOCK_TRANSLATION: 'true'
+          ADMIN_EMAIL: admin@example.test
+          SOURCE_HOST: wordpress.example
+          PILOT_HOST: fr.ttw.test
+          PILOT_ORIGIN: http://fr.ttw.test:8201
+        run: |
+          bash deployment/prepare-vps.sh
+          docker compose --env-file .env.vps -f compose.vps.yaml up -d --build --wait
+          curl -fsS http://127.0.0.1:8200/ready
+          curl -fsS -H 'Host: fr.ttw.test' http://127.0.0.1:8201/ | grep -F 'Dernières actualités'
       - name: View logs on failure
         if: failure()
         run: |
           cat api.log worker.log web.log 2>/dev/null || true
           docker compose logs
+          docker ps -a --filter label=com.docker.compose.project=ttw-translation

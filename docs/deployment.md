@@ -1,6 +1,28 @@
 # VPS pilot deployment
 
-## Build and start
+## Docker Compose with the existing Caddy proxy
+
+Use this deployment when the VPS already runs Docker Compose and has Caddy on ports 80 and 443. The project runs its own MySQL, Redis, API, public web, and worker containers. Caddy reaches the API and public web on host loopback ports 8200 and 8201.
+
+From the checkout on the VPS:
+
+```sh
+bash deployment/prepare-vps.sh
+nano .env.vps
+```
+
+Fill in `ADMIN_EMAIL`, `SOURCE_HOST` (the WordPress hostname), `PILOT_HOST` (the French hostname), `PILOT_ORIGIN` (the matching HTTPS origin without a trailing slash), and `DEEPL_API_KEY`. Use the generated `ADMIN_PASSWORD` on the sign-in page. The database password is generated as hex so it can be used in the connection URI. The seed and migrations run as a one-shot container before the application starts.
+
+```sh
+docker compose --env-file .env.vps -f compose.vps.yaml up -d --build --wait
+curl -fsS http://127.0.0.1:8200/ready
+```
+
+Create DNS records for the admin and French hostnames pointing at the VPS. Use `systemctl show caddy -p ExecStart` to identify the active Caddy configuration. Add the two hostname blocks from `deployment/Caddyfile.example` to that configuration, with the real names and any port overrides from `.env.vps`. For a standard Caddyfile at `/etc/caddy/Caddyfile`, validate it with `caddy validate --config /etc/caddy/Caddyfile`, then run `systemctl reload caddy`. Use the existing site's DNS and certificate workflow.
+
+Open the admin hostname over HTTPS and sign in. Follow the WordPress connector setup in the README to send one test article. For later updates, pull the release and run the same Compose command. Check the setup container's logs if migrations or seeding fail.
+
+## Install directly with Nginx and PM2
 
 Provision a Linux VPS with Node.js 24 LTS, MySQL 8.4, Redis, Nginx, and PM2. Bind MySQL, Redis, and the Node.js apps to private interfaces. Configure Redis persistence and a `noeviction` policy for BullMQ. Prefer a distinct Redis instance for the queue when adding application caching.
 
