@@ -98,13 +98,27 @@ class PlatformController {
       throw new UnauthorizedException('Invalid webhook authentication');
     }
     const article = articleSchema.safeParse(body);
-    if (!article.success)
-      throw new BadRequestException(article.error.issues.map((issue) => issue.path.join('.')));
+    if (!article.success) {
+      const fields = [...new Set(article.error.issues.map((issue) => issue.path.join('.') || 'body'))];
+      console.warn(
+        JSON.stringify({ event: 'wordpress_rejected', requestId, reason: 'invalid_payload', fields }),
+      );
+      throw new BadRequestException(fields);
+    }
     const host = normalizeHost(required('SOURCE_HOST'));
-    if (
-      article.data.sourceHost !== host ||
-      normalizeHost(new URL(article.data.canonical).hostname) !== host
-    ) {
+    const fields = [];
+    if (article.data.sourceHost !== host) fields.push('sourceHost');
+    if (normalizeHost(new URL(article.data.canonical).hostname) !== host) fields.push('canonical');
+    if (fields.length) {
+      console.warn(
+        JSON.stringify({
+          event: 'wordpress_rejected',
+          requestId,
+          postId: article.data.postId,
+          reason: 'source_host_mismatch',
+          fields,
+        }),
+      );
       throw new BadRequestException('Source host does not match configuration');
     }
     const result = await ingest(article.data, requestId, sha256(raw));

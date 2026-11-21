@@ -69,6 +69,18 @@ async function publicPage(path, hostname = host) {
 assert.equal((await fetch(api + '/ready')).status, 200);
 assert.equal((await publicPage('/', 'unknown.test')).status, 404);
 assert.equal((await post(randomUUID(), body, true)).status, 401);
+const invalidArticle = await post(
+  randomUUID(),
+  JSON.stringify({ ...JSON.parse(body), publishedAt: 'invalid date' }),
+);
+assert.equal(invalidArticle.status, 400);
+assert.deepEqual((await invalidArticle.json()).message, ['publishedAt']);
+const mismatchedSource = await post(
+  randomUUID(),
+  JSON.stringify({ ...JSON.parse(body), sourceHost: 'unexpected.example' }),
+);
+assert.equal(mismatchedSource.status, 400);
+assert.equal((await mismatchedSource.json()).message, 'Source host does not match configuration');
 const event = await post(requestId);
 const first = await event.json();
 assert.equal(event.status, 202, JSON.stringify(first));
