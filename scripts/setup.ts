@@ -52,7 +52,6 @@ async function seed() {
     }
   }
   const mock = !production && process.env.ALLOW_MOCK_TRANSLATION === 'true' && !process.env.DEEPL_API_KEY;
-  if (!mock && !process.env.DEEPL_API_KEY) throw new Error('Set DEEPL_API_KEY or enable the local mock');
   await execute("INSERT IGNORE INTO users (email,password_hash,role) VALUES (?,?,'super_admin')", [
     required('ADMIN_EMAIL').toLowerCase(),
     passwordHash(password),
@@ -60,12 +59,13 @@ async function seed() {
   await execute("INSERT IGNORE INTO languages (code,name) VALUES ('fr-FR','French')");
   await execute(
     'INSERT IGNORE INTO translation_providers (name,adapter,cost_inr_per_million) VALUES (?,?,?)',
-    [
-      mock ? 'Development Mock' : 'DeepL',
-      mock ? 'mock' : 'deepl',
-      mock ? 0 : Number(process.env.DEEPL_COST_INR_PER_MILLION ?? 0),
-    ],
+    ['DeepL', 'deepl', Number(process.env.DEEPL_COST_INR_PER_MILLION ?? 0)],
   );
+  if (mock) {
+    await execute(
+      "INSERT IGNORE INTO translation_providers (name,adapter) VALUES ('Development Mock','mock')",
+    );
+  }
   await execute(
     "INSERT IGNORE INTO translation_groups (name,description,daily_limit,provider_id) SELECT 'Premium','Pilot French publishing',100,id FROM translation_providers WHERE adapter=?",
     [mock ? 'mock' : 'deepl'],

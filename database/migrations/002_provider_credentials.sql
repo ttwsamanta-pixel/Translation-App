@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS provider_credentials (
+  provider_id INT UNSIGNED PRIMARY KEY,
+  encrypted_key TEXT NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  FOREIGN KEY (provider_id) REFERENCES translation_providers(id) ON DELETE CASCADE
+);

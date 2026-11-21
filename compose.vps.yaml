@@ -68,6 +68,7 @@ services:
       BIND_HOST: 0.0.0.0
       SOURCE_HOST: ${SOURCE_HOST:?Set SOURCE_HOST}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      PROVIDER_CREDENTIAL_SECRET: ${PROVIDER_CREDENTIAL_SECRET:?Run deployment/prepare-vps.sh}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?Set WEBHOOK_SECRET}
       WEBHOOK_API_KEY: ${WEBHOOK_API_KEY:?Set WEBHOOK_API_KEY}
     ports:
@@ -110,6 +111,7 @@ services:
       <<: [*database-env, *queue-env]
       NODE_ENV: ${NODE_ENV:-production}
       ALLOW_MOCK_TRANSLATION: ${ALLOW_MOCK_TRANSLATION:-false}
+      PROVIDER_CREDENTIAL_SECRET: ${PROVIDER_CREDENTIAL_SECRET:?Run deployment/prepare-vps.sh}
       DEEPL_API_KEY: ${DEEPL_API_KEY:-}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
     depends_on:

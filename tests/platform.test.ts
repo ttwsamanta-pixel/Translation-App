@@ -11,6 +11,19 @@ import { signWebhook, verifyWebhook, passwordHash, validPassword } from '../pack
 import { htmlSegments, rewriteLinks } from '../packages/shared/src/html';
 import { articlePath, jsonLd, links } from '../apps/web/src/seo';
 import { providers } from '../packages/providers/src';
+import {
+  decryptProviderCredential,
+  encryptProviderCredential,
+} from '../packages/shared/src/provider-credentials';
+
+test('protects stored provider credentials and binds them to their provider', () => {
+  const key = Buffer.alloc(32, 1);
+  const encrypted = encryptProviderCredential('unit-test-provider-key', key, 7);
+  assert.notEqual(encrypted, encryptProviderCredential('unit-test-provider-key', key, 7));
+  assert.equal(decryptProviderCredential(encrypted, key, 7), 'unit-test-provider-key');
+  assert.throws(() => decryptProviderCredential(encrypted, key, 8));
+  assert.throws(() => decryptProviderCredential(encrypted, Buffer.alloc(32, 2), 7));
+});
 
 const article = articleSchema.parse({
   postId: 42,

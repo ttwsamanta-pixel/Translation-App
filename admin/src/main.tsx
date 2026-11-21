@@ -104,6 +104,7 @@ const columns: Record<string, [string, string][]> = {
     ['name', 'Provider'],
     ['adapter', 'Model / Type'],
     ['cost_inr_per_million', 'INR / million characters'],
+    ['has_stored_key', 'API key'],
     ['enabled', 'Status'],
   ],
   languages: [
@@ -655,6 +656,7 @@ function Catalog({
     if (key.endsWith('enabled')) return <Badge state={String(Boolean(value))} />;
     if (key.endsWith('_at')) return dateLabel(value);
     if (key === 'cost_inr_per_million') return money(value);
+    if (key === 'has_stored_key') return row.adapter === 'deepl' ? (value ? 'Saved' : 'No key saved') : '—';
     if (key === 'role') return label(String(value));
     if (key === 'title' && page === 'articles')
       return (
@@ -826,6 +828,7 @@ function Catalog({
           row={configuration}
           kind={page === 'groups' ? 'groups' : 'providers'}
           demo={demo}
+          allowCredential={['super_admin', 'admin'].includes(session?.role ?? '')}
           token={session?.token}
           onClose={() => setConfiguration(undefined)}
           onSave={(record) => {
@@ -921,6 +924,7 @@ function ConfigurationForm({
   row,
   kind,
   demo,
+  allowCredential,
   token,
   onClose,
   onSave,
@@ -928,11 +932,13 @@ function ConfigurationForm({
   row: Row;
   kind: 'groups' | 'providers';
   demo: boolean;
+  allowCredential: boolean;
   token?: string;
   onClose: () => void;
   onSave: (value: Row) => void;
 }) {
   const isGroup = kind === 'groups';
+  const canSaveKey = !isGroup && row.adapter === 'deepl' && allowCredential;
   const [providers, setProviders] = useState<Row[]>(demo ? demoLists.providers : []);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -962,7 +968,13 @@ function ConfigurationForm({
     try {
       if ('provider_id' in value && value.provider_id === value.fallback_provider_id)
         throw new Error('Choose a different fallback provider.');
-      if (!demo) await api(row.id ? `${kind}/${row.id}` : kind, token, row.id ? 'PATCH' : 'POST', value);
+      const apiKey = canSaveKey ? String(form.get('api_key') ?? '').trim() : '';
+      if (!demo) {
+        await api(row.id ? `${kind}/${row.id}` : kind, token, row.id ? 'PATCH' : 'POST', {
+          ...value,
+          ...(apiKey ? { api_key: apiKey } : {}),
+        });
+      }
       const names: Row = isGroup
         ? {
             provider: providers.find((item) => item.id === value.provider_id)?.name ?? '',
@@ -1072,6 +1084,20 @@ function ConfigurationForm({
             <input type="checkbox" name="enabled" defaultChecked={Boolean(row.enabled ?? true)} />
             Enabled
           </label>
+          {canSaveKey && (
+            <label className="wide">
+              DeepL API key
+              <input
+                name="api_key"
+                type="password"
+                autoComplete="new-password"
+                maxLength={512}
+                placeholder={
+                  row.has_stored_key ? 'Enter a new key to replace the saved key' : 'Paste your DeepL API key'
+                }
+              />
+            </label>
+          )}
           {error && (
             <p className="form-error wide" role="alert">
               {error}

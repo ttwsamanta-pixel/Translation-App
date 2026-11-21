@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -19,6 +20,10 @@ import { z } from 'zod';
 import { execute, rows, transaction } from '../../../packages/database/src/db';
 import { Article, normalizeHost } from '../../../packages/shared/src/article';
 import { production, secret } from '../../../packages/shared/src/config';
+import {
+  encryptProviderCredential,
+  providerCredentialEncryptionKey,
+} from '../../../packages/shared/src/provider-credentials';
 import { redis } from '../../../packages/shared/src/queue';
 import { distribute } from './ingest';
 
@@ -72,6 +77,13 @@ const groupSchema = z
 const providerSchema = z.object({
   enabled: z.boolean(),
   cost_inr_per_million: z.number().min(0).max(9_999_999),
+  api_key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(/^[!-~]+$/, 'Enter a key without spaces')
+    .optional(),
 });
 const languageSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -148,8 +160,9 @@ const lists = {
   groups: `SELECT g.*,p.name provider,f.name fallback,(SELECT COUNT(*) FROM domains WHERE group_id=g.id) domains
     FROM translation_groups g JOIN translation_providers p ON p.id=g.provider_id LEFT JOIN translation_providers f ON f.id=g.fallback_provider_id
     WHERE (g.name LIKE ? OR p.name LIKE ?) AND (?='' OR g.enabled=?) ORDER BY g.priority,g.id`,
-  providers:
-    "SELECT id,name,adapter,enabled,cost_inr_per_million FROM translation_providers WHERE (name LIKE ? OR adapter LIKE ?) AND (?='' OR enabled=?) ORDER BY id",
+  providers: `SELECT p.id,p.name,p.adapter,p.enabled,p.cost_inr_per_million,
+    EXISTS(SELECT 1 FROM provider_credentials c WHERE c.provider_id=p.id) has_stored_key
+    FROM translation_providers p WHERE (p.name LIKE ? OR p.adapter LIKE ?) AND (?='' OR p.enabled=?) ORDER BY p.id`,
   languages:
     "SELECT id,name,code FROM languages WHERE (name LIKE ? OR code LIKE ?) AND (?='' OR code=?) ORDER BY name",
   memory:
@@ -430,13 +443,41 @@ export class AdminController {
 
   @Patch('providers/:id')
   async editProvider(@Req() request: Request, @Param('id') value: string, @Body() body: unknown) {
-    await authorize(request, managers);
+    const user = await authorize(request, managers);
     const id = parse(idSchema, value);
     const provider = parse(providerSchema, body);
-    const result = await execute(
-      'UPDATE translation_providers SET enabled=?,cost_inr_per_million=? WHERE id=?',
-      [provider.enabled, provider.cost_inr_per_million, id],
-    );
-    return { changed: Boolean(result.affectedRows) };
+    if (provider.api_key && !['super_admin', 'admin'].includes(user.role)) {
+      throw new ForbiddenException('Admin role required to save provider credentials');
+    }
+    return transaction(async (conn) => {
+      const [existing] = await rows<{ adapter: string }>(
+        'SELECT adapter FROM translation_providers WHERE id=? FOR UPDATE',
+        [id],
+        conn,
+      );
+      if (!existing) throw new NotFoundException();
+      if (provider.api_key) {
+        if (existing.adapter !== 'deepl')
+          throw new BadRequestException('This provider does not use an API key');
+        const key = providerCredentialEncryptionKey();
+        if (!key)
+          throw new ServiceUnavailableException(
+            'Provider credential encryption is not configured on the server',
+          );
+        const encrypted = encryptProviderCredential(provider.api_key, key, id);
+        await execute(
+          `INSERT INTO provider_credentials (provider_id,encrypted_key) VALUES (?,?)
+            AS new ON DUPLICATE KEY UPDATE encrypted_key=new.encrypted_key`,
+          [id, encrypted],
+          conn,
+        );
+      }
+      await execute(
+        'UPDATE translation_providers SET enabled=?,cost_inr_per_million=? WHERE id=?',
+        [provider.enabled, provider.cost_inr_per_million, id],
+        conn,
+      );
+      return { changed: true };
+    });
   }
 }

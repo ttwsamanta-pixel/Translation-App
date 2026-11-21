@@ -34,8 +34,7 @@ jobs:
       - name: Verify isolated VPS Compose deployment
         shell: bash
         env:
-          NODE_ENV: development
-          ALLOW_MOCK_TRANSLATION: 'true'
+          NODE_ENV: production
           ADMIN_EMAIL: admin@example.test
           SOURCE_HOST: wordpress.example
         run: |
@@ -45,9 +44,9 @@ jobs:
           node --env-file=.env.vps --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           const root = 'http://127.0.0.1:8200/api/v1/';
-          const json = async (path, body, token) => {
+          const json = async (path, body, token, method = body ? 'POST' : 'GET') => {
             const response = await fetch(root + path, {
-              method: body ? 'POST' : 'GET',
+              method,
               headers: {
                 ...(body && {'Content-Type':'application/json'}),
                 ...(token && {Authorization:'Bearer ' + token})
@@ -60,6 +59,16 @@ jobs:
           const {token} = await json('auth/login', {
             email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD
           });
+          const admin = await fetch('http://127.0.0.1:8200/');
+          assert.equal(admin.headers.get('x-robots-tag'), 'noindex');
+          assert.match(await admin.text(), /name="robots" content="noindex"/);
+          const deepl = (await json('catalog/providers', null, token)).items.find(row => row.adapter === 'deepl');
+          assert.equal(Number(deepl.has_stored_key), 0);
+          await json('providers/' + deepl.id, {enabled:true,cost_inr_per_million:0,api_key:'ci-example-key'}, token, 'PATCH');
+          await json('providers/' + deepl.id, {enabled:true,cost_inr_per_million:1}, token, 'PATCH');
+          const saved = (await json('catalog/providers', null, token)).items.find(row => row.id === deepl.id);
+          assert.equal(Number(saved.has_stored_key), 1);
+          assert.ok(!JSON.stringify(saved).includes('ci-example-key'));
           assert.deepEqual((await json('catalog/domains', null, token)).items, []);
           const chinese = await json('languages', {name:'Chinese (Simplified)',code:'zh-hans'}, token);
           assert.equal(chinese.code, 'zh-Hans');
@@ -72,6 +81,15 @@ jobs:
             enabled:true, sitemap_enabled:true, rss_enabled:true, manual_approval:true
           }, token);
           NODE
+          docker compose --env-file .env.vps -f compose.vps.yaml exec -T api node -e '
+            const assert = require("node:assert/strict");
+            const {rows,database} = require("./dist/packages/database/src/db");
+            const {decryptProviderCredential,providerCredentialEncryptionKey} = require("./dist/packages/shared/src/provider-credentials");
+            rows("SELECT provider_id,encrypted_key FROM provider_credentials").then(([row]) => {
+              assert.ok(!row.encrypted_key.includes("ci-example-key"));
+              assert.equal(decryptProviderCredential(row.encrypted_key,providerCredentialEncryptionKey(),row.provider_id),"ci-example-key");
+            }).catch(error => { console.error(error.message); process.exitCode = 1; }).finally(() => database().end());
+          '
           curl -fsS -H 'Host: www.fr.ttw.test' http://127.0.0.1:8201/ | grep -F 'Dernières actualités'
       - name: View logs on failure
         if: failure()

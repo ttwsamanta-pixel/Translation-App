@@ -2,8 +2,8 @@ import { production } from '../../shared/src/config';
 
 export type TranslationInput = { text: string[]; source: string; target: string };
 export interface TranslationProvider {
-  translate(input: TranslationInput): Promise<string[]>;
-  validateConfiguration(): boolean;
+  translate(input: TranslationInput, credential?: string): Promise<string[]>;
+  validateConfiguration(credential?: string): boolean;
 }
 
 export class ProviderError extends Error {
@@ -16,12 +16,12 @@ export class ProviderError extends Error {
 }
 
 class DeepLProvider implements TranslationProvider {
-  validateConfiguration() {
-    return Boolean(process.env.DEEPL_API_KEY);
+  validateConfiguration(credential?: string) {
+    return Boolean(credential ?? process.env.DEEPL_API_KEY);
   }
 
-  async translate({ text, source, target }: TranslationInput) {
-    const key = process.env.DEEPL_API_KEY;
+  async translate({ text, source, target }: TranslationInput, credential?: string) {
+    const key = credential ?? process.env.DEEPL_API_KEY;
     if (!key) throw new ProviderError('deepl_unconfigured');
     const origin = key.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
     const upper = target.toUpperCase();

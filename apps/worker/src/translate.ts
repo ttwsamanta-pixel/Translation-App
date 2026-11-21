@@ -2,10 +2,14 @@ import { Job, UnrecoverableError } from 'bullmq';
 import { execute, rows, transaction } from '../../../packages/database/src/db';
 import { Article, localizedSlug, sha256 } from '../../../packages/shared/src/article';
 import { htmlSegments } from '../../../packages/shared/src/html';
+import {
+  decryptProviderCredential,
+  providerCredentialEncryptionKey,
+} from '../../../packages/shared/src/provider-credentials';
 import { providers, ProviderError } from '../../../packages/providers/src';
 import { Work } from '../../../packages/shared/src/queue';
 
-type Provider = { id: number; adapter: string; enabled: number; cost_inr_per_million: string };
+type Provider = { id: number; adapter: string; cost_inr_per_million: string; encrypted_key: string | null };
 type Task = {
   id: number;
   article_id: number;
@@ -22,6 +26,16 @@ type Task = {
 
 async function translate(provider: Provider, task: Task, input: string[], fallback: boolean) {
   const adapter = providers[provider.adapter];
+  let credential: string | undefined;
+  if (provider.encrypted_key) {
+    const encryptionKey = providerCredentialEncryptionKey();
+    if (!encryptionKey) throw new ProviderError('provider_credential_key_missing');
+    try {
+      credential = decryptProviderCredential(provider.encrypted_key, encryptionKey, provider.id);
+    } catch {
+      throw new ProviderError('provider_credential_unreadable');
+    }
+  }
   const output = new Map<string, string>();
   const missing: string[] = [];
   for (const text of new Set(input.filter(Boolean))) {
@@ -49,8 +63,11 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
     const characters = batch.reduce((sum, text) => sum + Array.from(text).length, 0);
     let translated: string[] | undefined;
     try {
-      if (!adapter?.validateConfiguration()) throw new ProviderError('provider_unconfigured');
-      translated = await adapter.translate({ text: batch, source: task.payload.language, target: task.code });
+      if (!adapter?.validateConfiguration(credential)) throw new ProviderError('provider_unconfigured');
+      translated = await adapter.translate(
+        { text: batch, source: task.payload.language, target: task.code },
+        credential,
+      );
     } finally {
       await execute(
         `INSERT INTO provider_usage (job_id,provider_id,characters,cost_inr,success,is_fallback,duration_ms)
@@ -118,7 +135,8 @@ export async function runJob(job: Job<Work>) {
       ...parts.segments,
     ];
     const available = await rows<Provider>(
-      'SELECT * FROM translation_providers WHERE enabled=1 AND id IN (?,?)',
+      `SELECT p.id,p.adapter,p.cost_inr_per_million,c.encrypted_key FROM translation_providers p
+       LEFT JOIN provider_credentials c ON c.provider_id=p.id WHERE p.enabled=1 AND p.id IN (?,?)`,
       [task.provider_id, task.fallback_provider_id],
     );
     let selected = available.find((provider) => provider.id === task.provider_id);

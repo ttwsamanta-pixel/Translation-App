@@ -36,12 +36,13 @@ Use `curl.exe -H "Host: fr.ttw.test" http://127.0.0.1:3001/` on Windows to previ
 | `WEBHOOK_API_KEY`, `WEBHOOK_SECRET` | Independent credentials shared with the WordPress connector. Each requires at least 32 characters. |
 | `JWT_SECRET` | Independent random admin signing secret of at least 32 characters. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Initial Super Admin account. Password requires at least 12 characters. Rerunning the seed does not change an existing password. |
-| `DEEPL_API_KEY` | Server-side DeepL key. The adapter selects the DeepL endpoint from the key type. |
+| `DEEPL_API_KEY` | Optional server-side fallback when a key has not been saved in the admin panel. |
+| `PROVIDER_CREDENTIAL_SECRET` | 32 random bytes in hex for encrypting saved keys. The VPS setup script generates this. For local development, generate it with `openssl rand -hex 32`. |
 | `DEEPL_COST_INR_PER_MILLION` | Estimated rupee cost per million characters used when seeding DeepL. |
 | `ALLOW_MOCK_TRANSLATION` | Local-only mock when set to `true`. Mock article pages are labelled and excluded from feed, sitemap, and hreflang output. |
 | `WORKER_CONCURRENCY` | Maximum simultaneous translations per worker instance. Defaults to 2. |
 
-To switch an existing pilot from mock to DeepL, set the DeepL key and cost, rerun the seed to register the provider, then edit the Premium group in **Translation Groups**. Existing jobs retain their selected provider. Use fresh content or a fresh staging database to verify DeepL separately. [DeepL API authentication and endpoints](https://developers.deepl.com/docs/getting-started/auth)
+Sign in as an admin and save the key under **Providers (APIs) → DeepL → Edit**. The saved key is encrypted at rest and takes precedence over the optional environment key. To switch a pilot from mock to DeepL, run the current seed to ensure the provider is registered, then edit the Premium group in **Translation Groups**. Existing jobs retain their selected provider. [DeepL API authentication and endpoints](https://developers.deepl.com/docs/getting-started/auth)
 
 ### Project layout
 

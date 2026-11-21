@@ -127,6 +127,10 @@ async function start() {
     logger: ['error', 'warn', 'log'],
   });
   app.use(helmet());
+  app.use((_request: Request, response: Response, next: express.NextFunction) => {
+    response.setHeader('X-Robots-Tag', 'noindex');
+    next();
+  });
   app.use(
     json({
       limit: '1mb',
