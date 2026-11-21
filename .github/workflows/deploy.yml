@@ -1,0 +1,54 @@
+name: Deploy to Hostinger
+
+on:
+  workflow_run:
+    workflows: ["Verify pilot"]
+    branches: [main]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy the verified commit
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          VPS_SSH_HOST: ${{ vars.VPS_SSH_HOST }}
+          VPS_SSH_USER: ${{ vars.VPS_SSH_USER || 'root' }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$VPS_SSH_HOST" || -z "$VPS_SSH_KEY" || -z "$VPS_SSH_KNOWN_HOSTS" ]]; then
+            echo "::notice::Hostinger auto-deploy is not configured. See docs/deployment.md."
+            exit 0
+          fi
+          if [[ ! "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ||
+                ! "$VPS_SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ||
+                ! "$VPS_SSH_USER" =~ ^[A-Za-z0-9_-]+$ ||
+                ! "$VPS_SSH_PORT" =~ ^[0-9]{1,5}$ ]]; then
+            echo "::error::Invalid deployment commit or SSH settings."
+            exit 1
+          fi
+          umask 077
+          ssh_files=$(mktemp -d "$RUNNER_TEMP/ttw-ssh.XXXXXX")
+          key_file="$ssh_files/deploy_key"
+          known_hosts="$ssh_files/known_hosts"
+          trap 'rm -f -- "$key_file" "$known_hosts"; rmdir -- "$ssh_files"' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$key_file"
+          printf '%s\n' "$VPS_SSH_KNOWN_HOSTS" > "$known_hosts"
+          unset VPS_SSH_KEY VPS_SSH_KNOWN_HOSTS
+          ssh -T -i "$key_file" -l "$VPS_SSH_USER" -p "$VPS_SSH_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$known_hosts" -o GlobalKnownHostsFile=/dev/null \
+            -o ConnectTimeout=15 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+            -- "$VPS_SSH_HOST" "deploy $DEPLOY_SHA"

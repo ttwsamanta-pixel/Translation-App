@@ -24,6 +24,53 @@ Open the admin hostname over HTTPS and sign in. Add missing locale codes under *
 
 Save a translation key under **Providers (APIs)**, enable that provider, and select it for the appropriate group before sending articles. Keep `PROVIDER_CREDENTIAL_SECRET` in the protected configuration backup alongside the database backup. For an existing deployment, rerun `bash deployment/prepare-vps.sh` to add this secret to the existing `.env.vps`. The admin and API serve `X-Robots-Tag: noindex`. The public sites retain their published article indexing rules.
 
+## Automatic deployment with GitHub Actions
+
+`.github/workflows/deploy.yml` runs after **Verify pilot** succeeds for a push to `main`. It connects over SSH and requests the exact verified commit. The VPS serializes deployments, applies a fast-forward update, runs the database setup and Compose deployment, then checks API readiness. This workflow covers the containers on the VPS. Deploy the WordPress connector separately when that plugin changes.
+
+### One-time VPS setup
+
+From the Hostinger terminal as the owner of `/opt/translation-app`, pull the workflow and install its SSH command outside the checkout. The existing root-owned Hostinger installation uses these commands:
+
+```sh
+cd /opt/translation-app
+git pull --ff-only
+install -m 0755 deployment/auto-deploy-vps.sh /usr/local/sbin/ttw-translation-deploy
+install -d -m 0700 /root/.ssh
+ssh-keygen -t ed25519 -N '' -C ttw-translation-github-actions -f /root/.ssh/ttw-translation-actions
+```
+
+Add this public key once. OpenSSH will limit this key to the deployment command.
+
+```sh
+touch /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+{
+  printf '\n'
+  sed 's!^!restrict,command="/usr/local/sbin/ttw-translation-deploy" !' /root/.ssh/ttw-translation-actions.pub
+} >> /root/.ssh/authorized_keys
+```
+
+### GitHub Actions settings
+
+Open the repository's **Settings → Secrets and variables → Actions**. Add the following values:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Repository variable | `VPS_SSH_HOST` | Public VPS IP or its SSH hostname. |
+| Repository secret | `VPS_SSH_KEY` | Complete private key from `/root/.ssh/ttw-translation-actions`. Paste it directly into GitHub. |
+| Repository secret | `VPS_SSH_KNOWN_HOSTS` | A single line with the value of `VPS_SSH_HOST`, then a space, then the key type and public key from `/etc/ssh/ssh_host_ed25519_key.pub`. |
+
+For port 22, run this in the Hostinger terminal to generate the known-hosts line. Substitute the same address you entered for `VPS_SSH_HOST`.
+
+```sh
+awk '{print "VPS_ADDRESS", $1, $2}' /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+The default connection is `root` on port `22`. For a different existing SSH account or port, add repository variables `VPS_SSH_USER` and/or `VPS_SSH_PORT`. Ensure that account owns the checkout, can use Docker, and has the restricted key. If the port is different, format the host field in the known-hosts entry as `[host]:port`.
+
+Open **Actions → Verify pilot**, choose the latest successful push run on `main`, and select **Re-run all jobs** to test the setup. Check **Deploy to Hostinger** for the deployed commit and readiness result. Future pushes to `main` follow the same sequence. Keep local configuration in the ignored `.env.vps` and the checkout clean for fast-forward deploys.
+
 ## Install directly with Nginx and PM2
 
 Provision a Linux VPS with Node.js 24 LTS, MySQL 8.4, Redis, Nginx, and PM2. Bind MySQL, Redis, and the Node.js apps to private interfaces. Configure Redis persistence and a `noeviction` policy for BullMQ. Prefer a distinct Redis instance for the queue when adding application caching.
