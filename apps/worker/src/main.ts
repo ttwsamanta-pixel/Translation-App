@@ -6,7 +6,7 @@ import { runJob } from './translate';
 const connection = redis(true);
 connection.on('error', (error) => console.error(JSON.stringify({ event: 'redis_error', type: error.name })));
 const queue = new Queue<Work>(translationQueue, { connection });
-const worker = new Worker<Work>(translationQueue, runJob, {
+const worker = new Worker<Work>(translationQueue, (job) => runJob(job, connection), {
   connection,
   concurrency: Number(process.env.WORKER_CONCURRENCY ?? 2),
 });

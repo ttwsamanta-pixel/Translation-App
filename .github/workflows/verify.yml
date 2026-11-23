@@ -19,6 +19,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: php -l wordpress-plugin/translation-connector/translation-connector.php
+      - run: php -l wordpress-plugin/translation-connector/admin.php
       - run: docker compose up -d --wait
       - name: Migrate, seed, and exercise the pilot
         shell: bash

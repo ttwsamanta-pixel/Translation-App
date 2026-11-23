@@ -23,6 +23,8 @@ const body = JSON.stringify({
     '<figure><img src="/photos/hero.jpg" alt="Stadium"></figure><p>Travel news from <a href="/europe">Europe</a>.</p>',
   featuredImage: 'https://' + sourceHost + '/photos/hero.jpg',
   excerpt: 'The latest travel report',
+  categories: ['Travel'],
+  author: 'Travel Desk',
   slug: 'european-tourism-report',
   publishedAt: stamp,
   modifiedAt: stamp,
@@ -31,12 +33,12 @@ const body = JSON.stringify({
   language: 'en',
 });
 const requestId = randomUUID();
-const post = (id, raw = body, expired = false) => {
+const post = (id, raw = body, expired = false, path = 'article') => {
   const timestamp = String(Math.floor(Date.now() / 1000) - (expired ? 360 : 0));
   const signature = createHmac('sha256', secret)
     .update(timestamp + '.' + id + '.' + raw)
     .digest('hex');
-  return fetch(api + '/api/v1/webhooks/wordpress/article', {
+  return fetch(api + '/api/v1/webhooks/wordpress/' + path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -71,6 +73,21 @@ async function publicPage(path, hostname = host) {
 assert.equal((await fetch(api + '/ready')).status, 200);
 assert.equal((await publicPage('/', 'unknown.test')).status, 404);
 assert.equal((await post(randomUUID(), body, true)).status, 401);
+assert.equal(
+  (await (await post(randomUUID(), JSON.stringify({ sourceHost }), false, 'test')).json()).status,
+  'connected',
+);
+const taxonomy = await post(
+  randomUUID(),
+  JSON.stringify({
+    sourceHost,
+    categories: [{ id: 27, parent: 0, name: 'Hotels' }],
+  }),
+  false,
+  'categories',
+);
+assert.equal(taxonomy.status, 200);
+assert.equal((await taxonomy.json()).synced, 1);
 const invalidArticle = await post(
   randomUUID(),
   JSON.stringify({ ...JSON.parse(body), publishedAt: 'invalid date' }),
@@ -118,6 +135,15 @@ assert.ok(html.includes('lang="fr-FR"'));
 assert.ok(html.includes(process.env.PILOT_ORIGIN + publicPath));
 assert.match(html, /<h1>.+<\/h1>/);
 assert.equal([...html.matchAll(/<img\b[^>]*src="[^"]*\/photos\/hero\.jpg"/g)].length, 1);
+assert.match(html, /href="\/category\/Travel"/);
+assert.match(html, /href="\/author\/Travel%20Desk"/);
+for (const route of ['/category/Travel', '/author/Travel%20Desk', '/search?q=tourism', '/news']) {
+  const listing = await publicPage(route);
+  assert.equal(listing.status, 200, route);
+  assert.ok(listing.body.includes(publicPath), route);
+}
+assert.equal((await publicPage('/category/DoesNotExist')).status, 404);
+assert.ok((await publicPage('/')).body.includes(publicPath));
 const overview = await admin('overview', options);
 assert.ok(overview.jobs.some((row) => row.state === 'published'));
 assert.ok(overview.usage.some((row) => Number(row.requests) > 0));
@@ -137,6 +163,7 @@ const withdrawn = JSON.stringify({
 });
 assert.equal((await post(randomUUID(), withdrawn)).status, 202);
 assert.equal((await publicPage(publicPath)).status, 404);
+assert.ok(!(await publicPage('/')).body.includes(publicPath), 'Withdrawal invalidates the cached homepage');
 const domains = await admin('catalog/domains', options);
 assert.equal(domains.items.length, 1);
 const domain = domains.items[0];
@@ -204,6 +231,73 @@ if (process.env.ALLOW_MOCK_TRANSLATION === 'true' && !process.env.DEEPL_API_KEY)
     await saveDomain({});
   }
 }
+const write = (path, body, method = 'POST') =>
+  admin(path, {
+    method,
+    headers: { ...options.headers, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+const website = await admin('website', options);
+const version = await write('website/versions', {
+  ...website.design,
+  name: 'Verified shared template',
+  pages: [{ slug: 'about', title: 'About this edition', content: 'Local edition information.' }],
+});
+assert.ok(!(await publicPage('/')).body.includes('Verified shared template'));
+await write(`website/versions/${version.id}/publish`);
+assert.ok((await publicPage('/')).body.includes('Verified shared template'));
+assert.match((await publicPage('/page/about')).body, /Local edition information/);
+assert.match((await publicPage('/sitemap.xml')).body, /\/page\/about/);
+const override = { name: 'Verified domain override' };
+await write('website/overrides/' + domain.id, override, 'PUT');
+assert.ok((await publicPage('/')).body.includes(override.name));
+await write(
+  'website/translations/' + domain.language_id,
+  { labels: { latest: 'Infos vérifiées' }, categories: { Travel: 'Voyages' } },
+  'PUT',
+);
+assert.match((await publicPage('/')).body, /Infos vérifiées/);
+const rule = {
+  category: 'Travel',
+  domain_id: domain.id,
+  group_id: null,
+  daily_limit: 1,
+  priority: 3,
+  enabled: true,
+  provider_id: null,
+  fallback_provider_id: null,
+};
+await write('distribution/rules', rule);
+assert.ok((await admin('distribution/rules', options)).categories.some(({ name }) => name === 'Hotels'));
+const wrongCategory = { ...JSON.parse(newPost('5')), categories: ['Hotels'] };
+const batch = JSON.stringify([JSON.parse(newPost('6')), wrongCategory, JSON.parse(newPost('7'))]);
+const batchId = randomUUID();
+const bulk = await post(batchId, batch, false, 'articles/bulk');
+assert.equal(bulk.status, 202);
+assert.deepEqual(
+  (await bulk.json()).results.map((item) => item.created),
+  [1, 0, 0],
+);
+assert.equal((await post(batchId, batch + ' ', false, 'articles/bulk')).status, 409);
+assert.ok(
+  (await (await post(batchId, batch, false, 'articles/bulk')).json()).results.every((item) => item.duplicate),
+);
+assert.equal(Number((await admin('distribution/rules', options)).rules[0].used), 1);
+const viewer = await write('users', {
+  email: `viewer-${postId}@example.test`,
+  password: 'a-local-smoke-password',
+  role: 'viewer',
+  enabled: true,
+});
+assert.ok(viewer.id);
+const viewerSession = await admin('auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: `viewer-${postId}@example.test`, password: 'a-local-smoke-password' }),
+});
+const viewerHeaders = { Authorization: 'Bearer ' + viewerSession.token };
+assert.equal((await fetch(api + '/api/v1/overview', { headers: viewerHeaders })).status, 200);
+assert.equal((await fetch(api + '/api/v1/distribution/rules', { headers: viewerHeaders })).status, 403);
 console.log(
-  'Smoke test passed: signed ingestion, replay handling, worker publishing, SSR, metadata, usage, withdrawal, quotas, disabled domains, fallback and approval.',
+  'Smoke test passed: signed ingestion and bulk replay handling, publication, website templates, localization, metadata, quotas, fallback and approval.',
 );

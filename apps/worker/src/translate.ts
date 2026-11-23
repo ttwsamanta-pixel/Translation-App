@@ -1,5 +1,7 @@
 import { Job, UnrecoverableError } from 'bullmq';
+import type IORedis from 'ioredis';
 import { execute, rows, transaction } from '../../../packages/database/src/db';
+import { refreshWebsiteCache } from '../../../packages/database/src/website';
 import { Article, localizedSlug, sha256 } from '../../../packages/shared/src/article';
 import { htmlSegments } from '../../../packages/shared/src/html';
 import {
@@ -7,9 +9,10 @@ import {
   providerCredentialEncryptionKey,
 } from '../../../packages/shared/src/provider-credentials';
 import { providers, ProviderError } from '../../../packages/providers/src';
+import { reserveProviderRequest, type ProviderLimits } from '../../../packages/providers/src/limits';
 import { Work } from '../../../packages/shared/src/queue';
 
-type Provider = {
+type Provider = ProviderLimits & {
   id: number;
   adapter: string;
   model: string | null;
@@ -30,7 +33,7 @@ type Task = {
   state: string;
 };
 
-async function translate(provider: Provider, task: Task, input: string[], fallback: boolean) {
+async function translate(provider: Provider, task: Task, input: string[], fallback: boolean, redis: IORedis) {
   const adapter = providers[provider.adapter];
   const maxBatchBytes = adapter?.maxBatchBytes ?? 110_000;
   let credential: string | undefined;
@@ -67,17 +70,20 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
       batch.push(text);
       index++;
     }
+    if (!adapter?.validateConfiguration(credential)) throw new ProviderError('provider_unconfigured');
+    const release = await reserveProviderRequest(redis, provider.id, provider);
+    if (!release) throw new ProviderError('provider_request_limit');
     const started = Date.now();
     const characters = batch.reduce((sum, text) => sum + Array.from(text).length, 0);
     let translated: string[] | undefined;
     try {
-      if (!adapter?.validateConfiguration(credential)) throw new ProviderError('provider_unconfigured');
       translated = await adapter.translate(
         { text: batch, source: task.payload.language, target: task.code },
         credential,
         provider.model ?? undefined,
       );
     } finally {
+      await release();
       await execute(
         `INSERT INTO provider_usage (job_id,provider_id,characters,cost_inr,success,is_fallback,duration_ms)
         VALUES (?,?,?,?,?,?,?)`,
@@ -108,7 +114,7 @@ async function translate(provider: Provider, task: Task, input: string[], fallba
   return input.map((text) => output.get(text) ?? '');
 }
 
-export async function runJob(job: Job<Work>) {
+export async function runJob(job: Job<Work>, redis: IORedis) {
   const { id, generation } = job.data;
   const [task] = await rows<Task>(
     `SELECT j.*, l.code, v.payload, d.manual_approval,
@@ -144,24 +150,26 @@ export async function runJob(job: Job<Work>) {
       ...parts.segments,
     ];
     const available = await rows<Provider>(
-      `SELECT p.id,p.adapter,p.model,p.cost_inr_per_million,c.encrypted_key FROM translation_providers p
-       LEFT JOIN provider_credentials c ON c.provider_id=p.id WHERE p.enabled=1 AND p.id IN (?,?)`,
+      `SELECT p.id,p.adapter,p.model,p.cost_inr_per_million,c.encrypted_key,
+         policy.requests_per_minute,policy.requests_per_day,policy.concurrent_requests
+       FROM translation_providers p LEFT JOIN provider_credentials c ON c.provider_id=p.id
+       LEFT JOIN provider_policies policy ON policy.provider_id=p.id WHERE p.enabled=1 AND p.id IN (?,?)`,
       [task.provider_id, task.fallback_provider_id],
     );
     let selected = available.find((provider) => provider.id === task.provider_id);
     let translated: string[];
     try {
       if (!selected) throw new ProviderError('provider_disabled');
-      translated = await translate(selected, task, values, false);
+      translated = await translate(selected, task, values, false, redis);
     } catch (error) {
-      if (!(error instanceof ProviderError) || !error.transient) throw error;
+      if (!(error instanceof ProviderError)) throw error;
       const fallback = available.find(
         (provider) => provider.id === task.fallback_provider_id && provider.id !== task.provider_id,
       );
       if (!fallback) throw error;
       console.log(JSON.stringify({ event: 'provider_fallback', jobId: id, reason: error.code }));
       selected = fallback;
-      translated = await translate(fallback, task, values, true);
+      translated = await translate(fallback, task, values, true, redis);
     }
     const [title, excerpt, seoTitle, description, ...content] = translated;
     if (!title.trim() || !content.join('').trim()) throw new ProviderError('empty_translation', false);
@@ -218,6 +226,7 @@ export async function runJob(job: Job<Work>) {
         conn,
       );
       await execute('UPDATE translation_jobs SET state=? WHERE id=?', [state, id], conn);
+      if (state === 'published') await refreshWebsiteCache(task.domain_id, conn);
     });
   } catch (error) {
     const permanent = error instanceof ProviderError && !error.transient;

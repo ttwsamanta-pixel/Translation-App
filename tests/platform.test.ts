@@ -12,6 +12,46 @@ import { firstImageMatches, htmlSegments, rewriteLinks } from '../packages/share
 import { publicLabels } from '../apps/web/src/locale';
 import { articlePath, jsonLd, links } from '../apps/web/src/seo';
 import { providers } from '../packages/providers/src';
+import { defaultWebsite, localizationSchema, websiteSchema } from '../packages/shared/src/website';
+import { categoryLabel, renderPage } from '../apps/web/src/template';
+
+test('shared website settings reject unsafe URLs and render stored edition labels', () => {
+  assert.equal(
+    websiteSchema.safeParse({
+      ...defaultWebsite,
+      navigation: [{ label: 'Unsafe', href: '//elsewhere.example' }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    websiteSchema.safeParse({
+      ...defaultWebsite,
+      name: 'Valid edition',
+      logo: 'https://assets.example/logo.svg',
+    }).success,
+    true,
+  );
+  const localization = localizationSchema.parse({
+    labels: { languages: 'Langues de lecture' },
+    categories: { Travel: 'Voyages' },
+  });
+  const context = {
+    code: 'fr-FR',
+    labels: publicLabels('fr-FR', localization.labels),
+    design: { ...defaultWebsite, name: '<TTW>' },
+    rss: true,
+    categoryLabels: localization.categories,
+    editions: [
+      { name: 'German', code: 'de-DE', url: 'https://de.example/article/urlaub-42', current: false },
+    ],
+  };
+  const html = renderPage(context, 'Un article', '<article>Story</article>', '');
+  assert.match(html, /Langues de lecture/);
+  assert.match(html, /href="https:\/\/de\.example\/article\/urlaub-42"/);
+  assert.match(html, /&lt;TTW&gt;/);
+  assert.equal(categoryLabel(context, 'Travel'), 'Voyages');
+  assert.equal(categoryLabel(context, 'constructor'), 'constructor');
+});
 
 test('reuses the first article image when it matches the featured image', () => {
   const source = 'https://wordpress.example/news/story';

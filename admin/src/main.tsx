@@ -32,7 +32,17 @@ import {
   providerKinds,
   type ProviderKind,
 } from '../../packages/shared/src/provider-catalog';
+import {
+  accountManagers,
+  contentEditors,
+  domainManagers,
+  roles,
+  siteManagers,
+  translationManagers,
+} from '../../packages/shared/src/roles';
 import { Badge, Dashboard, Panel, Table, Usage } from './dashboard';
+import { DistributionRules } from './distribution';
+import { WebsiteEditor } from './website';
 import { dateLabel, demoLists, demoOverview, label, money, number, Overview, Row } from './data';
 import './style.css';
 
@@ -42,8 +52,11 @@ const navigation = [
   ['jobs', 'Translation Jobs', ClipboardList],
   ['domains', 'Domains', Globe2],
   ['groups', 'Translation Groups', Waypoints],
+  ['distribution', 'Distribution', Waypoints],
   ['providers', 'Providers (APIs)', Bot],
   ['languages', 'Languages', Languages],
+  ['website', 'Website', Globe2],
+  ['localization', 'Localization', Languages],
   ['memory', 'Translation Memory', Layers],
   ['taxonomy', 'Categories & Tags', Tag],
   ['redirects', 'Redirects', GitFork],
@@ -51,6 +64,7 @@ const navigation = [
   ['rss', 'RSS Feeds', Radio],
   ['usage', 'Usage & Cost', Activity],
   ['logs', 'Webhook Logs', ClipboardList],
+  ['activity', 'Admin Activity', Activity],
   ['users', 'Users & Roles', Users],
   ['settings', 'Settings', Settings],
 ] as const;
@@ -141,6 +155,13 @@ const columns: Record<string, [string, string][]> = {
     ['email', 'Email'],
     ['role', 'Role'],
     ['enabled', 'Status'],
+  ],
+  activity: [
+    ['email', 'Account'],
+    ['method', 'Method'],
+    ['path', 'Route'],
+    ['status', 'HTTP'],
+    ['created_at', 'Date'],
   ],
 };
 const jobStates = [
@@ -268,18 +289,30 @@ function App() {
         </button>
         {signedIn && (
           <nav aria-label="Main navigation">
-            {navigation.map(([id, name, Icon]) => (
-              <button
-                key={id}
-                onClick={() => navigate(id)}
-                className={page === id ? 'selected' : ''}
-                aria-current={page === id ? 'page' : undefined}
-              >
-                <Icon size={19} />
-                <span>{name}</span>
-                {id === 'domains' && data && <small>{data.domains.total}</small>}
-              </button>
-            ))}
+            {navigation
+              .filter(([id]) => {
+                const access =
+                  id === 'users' || id === 'activity'
+                    ? accountManagers
+                    : id === 'distribution'
+                      ? translationManagers
+                      : id === 'website' || id === 'localization'
+                        ? siteManagers
+                        : undefined;
+                return !access || demo || access.includes(session?.role ?? '');
+              })
+              .map(([id, name, Icon]) => (
+                <button
+                  key={id}
+                  onClick={() => navigate(id)}
+                  className={page === id ? 'selected' : ''}
+                  aria-current={page === id ? 'page' : undefined}
+                >
+                  <Icon size={19} />
+                  <span>{name}</span>
+                  {id === 'domains' && data && <small>{data.domains.total}</small>}
+                </button>
+              ))}
           </nav>
         )}
         {data && (
@@ -453,7 +486,13 @@ function App() {
                   </div>
                 </Panel>
               )}
-              {!['dashboard', 'usage', 'settings'].includes(page) && (
+              {page === 'distribution' && <DistributionRules api={api} token={token} />}
+              {(page === 'website' || page === 'localization') && (
+                <WebsiteEditor key={page} api={api} token={token} view={page} />
+              )}
+              {!['dashboard', 'usage', 'settings', 'distribution', 'website', 'localization'].includes(
+                page,
+              ) && (
                 <Catalog
                   key={page}
                   page={page}
@@ -568,11 +607,15 @@ function Catalog({
   const [error, setError] = useState('');
   const [domain, setDomain] = useState<Row>();
   const [addingLanguage, setAddingLanguage] = useState(false);
+  const [account, setAccount] = useState<Row>();
   const [configuration, setConfiguration] = useState<Row>();
   const [article, setArticle] = useState<Row>();
   const [tick, setTick] = useState(0);
-  const canManage = demo || ['super_admin', 'admin', 'translation_manager'].includes(session?.role ?? '');
-  const canEdit = canManage || session?.role === 'editor';
+  const [testingProvider, setTestingProvider] = useState<Row['id']>();
+  const canManage = demo || translationManagers.includes(session?.role ?? '');
+  const canManageDomains = demo || domainManagers.includes(session?.role ?? '');
+  const canManageUsers = !demo && accountManagers.includes(session?.role ?? '');
+  const canEdit = demo || contentEditors.includes(session?.role ?? '');
   useEffect(() => {
     if (demo) {
       const records = previewLists[source] ?? [];
@@ -677,13 +720,62 @@ function Catalog({
     return value ?? '—';
   };
   const actions = (row: Row) => {
-    if (page === 'domains' && canManage)
+    if (page === 'users' && canManageUsers) {
+      const canEditAccount =
+        session?.role === 'super_admin' ||
+        session?.email === row.email ||
+        !accountManagers.includes(String(row.role));
+      return canEditAccount ? (
+        <button className="text-button" onClick={() => setAccount(row)}>
+          Edit
+        </button>
+      ) : (
+        '—'
+      );
+    }
+    if (page === 'domains' && canManageDomains)
       return (
         <button className="text-button" onClick={() => setDomain(row)}>
           Edit
         </button>
       );
-    if (['groups', 'providers'].includes(page) && canManage)
+    if (page === 'providers' && canManage)
+      return (
+        <div className="config-section">
+          <button className="text-button" onClick={() => setConfiguration(row)}>
+            Edit
+          </button>
+          {!demo && (
+            <button
+              className="text-button"
+              disabled={testingProvider !== undefined}
+              onClick={async () => {
+                setTestingProvider(row.id);
+                try {
+                  const result = await api<{ connected: boolean; code?: string }>(
+                    'providers/test',
+                    session?.token,
+                    'POST',
+                    { id: row.id },
+                  );
+                  notice(
+                    result.connected
+                      ? `${row.name} translated the test phrase.`
+                      : `${row.name} test failed (${result.code}).`,
+                  );
+                } catch (failure) {
+                  notice(failure instanceof Error ? failure.message : 'Provider test failed.');
+                } finally {
+                  setTestingProvider(undefined);
+                }
+              }}
+            >
+              {testingProvider === row.id ? 'Testing…' : 'Test (French)'}
+            </button>
+          )}
+        </div>
+      );
+    if (page === 'groups' && canManage)
       return (
         <button className="text-button" onClick={() => setConfiguration(row)}>
           Edit
@@ -725,7 +817,9 @@ function Catalog({
     );
   };
   const showActions =
-    (['domains', 'groups', 'providers'].includes(page) && canManage) ||
+    (['groups', 'providers'].includes(page) && canManage) ||
+    (page === 'domains' && canManageDomains) ||
+    (page === 'users' && canManageUsers) ||
     (page === 'jobs' && canEdit) ||
     ['seo', 'rss'].includes(page);
   return (
@@ -760,7 +854,7 @@ function Catalog({
             ))}
           </select>
         )}
-        {page === 'domains' && canManage && (
+        {page === 'domains' && canManageDomains && (
           <button className="primary add" onClick={() => setDomain({})}>
             <Plus size={16} />
             Add domain
@@ -778,7 +872,12 @@ function Catalog({
             Add provider
           </button>
         )}
-        {page === 'languages' && canManage && (
+        {page === 'users' && canManageUsers && (
+          <button className="primary add" onClick={() => setAccount({})}>
+            <Plus size={16} /> Add user
+          </button>
+        )}
+        {page === 'languages' && canManageDomains && (
           <button className="primary add" onClick={() => setAddingLanguage(true)}>
             <Plus size={16} />
             Add language
@@ -823,6 +922,18 @@ function Catalog({
           }}
         />
       )}
+      {account && session && (
+        <AccountForm
+          row={account}
+          session={session}
+          onClose={() => setAccount(undefined)}
+          onSave={() => {
+            setAccount(undefined);
+            setTick((value) => value + 1);
+            notice('Account saved.');
+          }}
+        />
+      )}
       {addingLanguage && (
         <LanguageForm
           demo={demo}
@@ -855,6 +966,109 @@ function Catalog({
         />
       )}
     </section>
+  );
+}
+
+function AccountForm({
+  row,
+  session,
+  onClose,
+  onSave,
+}: {
+  row: Row;
+  session: Session;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const own = session.email === row.email;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get('password') ?? '');
+    setSaving(true);
+    setError('');
+    try {
+      await api(row.id ? 'users/' + row.id : 'users', session.token, row.id ? 'PATCH' : 'POST', {
+        email: String(form.get('email')).trim(),
+        role: own ? row.role : form.get('role'),
+        enabled: own || form.has('enabled'),
+        ...(password && { password }),
+      });
+      onSave();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Unable to save user');
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="overlay">
+      <section className="panel dialog domain-dialog" role="dialog" aria-labelledby="account-title">
+        <header className="panel-heading">
+          <Users />
+          <h2 id="account-title">{row.id ? 'Edit user' : 'Add user'}</h2>
+          <button className="dialog-close icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </header>
+        <form className="domain-form" onSubmit={(event) => void save(event)}>
+          <label>
+            Email
+            <input name="email" type="email" defaultValue={String(row.email ?? '')} required />
+          </label>
+          <label>
+            Role
+            <select name="role" defaultValue={String(row.role ?? 'viewer')} disabled={own}>
+              {roles
+                .filter(
+                  (role) =>
+                    session.role === 'super_admin' || !accountManagers.includes(role) || role === row.role,
+                )
+                .map((role) => (
+                  <option key={role} value={role}>
+                    {label(role)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            {row.id ? 'New password (optional)' : 'Password'}
+            <input
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              maxLength={250}
+              required={!row.id}
+            />
+          </label>
+          <label className="check">
+            <input
+              name="enabled"
+              type="checkbox"
+              disabled={own}
+              defaultChecked={Boolean(row.enabled ?? true)}
+            />{' '}
+            Enabled
+          </label>
+          {error && (
+            <p className="form-error wide" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="form-actions wide">
+            <button type="button" className="secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary" disabled={saving}>
+              Save user
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -986,6 +1200,9 @@ function ConfigurationForm({
       : {
           enabled,
           cost_inr_per_million: Number(form.get('cost_inr_per_million')),
+          requests_per_minute: Number(form.get('requests_per_minute')) || null,
+          requests_per_day: Number(form.get('requests_per_day')) || null,
+          concurrent_requests: Number(form.get('concurrent_requests')) || null,
           ...(creatingProvider ? { adapter: providerKind, name: String(form.get('name')).trim() } : {}),
           ...(providerInfo?.defaultModel ? { model: String(form.get('model')).trim() } : {}),
         };
@@ -1139,6 +1356,25 @@ function ConfigurationForm({
                   defaultValue={String(row.cost_inr_per_million ?? 0)}
                 />
               </label>
+              {(
+                [
+                  ['requests_per_minute', 'Requests per minute', 100000],
+                  ['requests_per_day', 'Requests per UTC day', 10000000],
+                  ['concurrent_requests', 'Concurrent requests', 500],
+                ] as const
+              ).map(([key, title, maximum]) => (
+                <label key={key}>
+                  {title}
+                  <input
+                    name={key}
+                    type="number"
+                    min="1"
+                    max={maximum}
+                    placeholder="No cap"
+                    defaultValue={String(row[key] ?? '')}
+                  />
+                </label>
+              ))}
             </>
           )}
           <label className="check wide">
@@ -1195,14 +1431,16 @@ function DomainForm({
 }) {
   const [languages, setLanguages] = useState<Row[]>(demo ? previewLists.languages : []);
   const [groups, setGroups] = useState<Row[]>(demo ? previewLists.groups : []);
+  const [providers, setProviders] = useState<Row[]>(demo ? previewLists.providers : []);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (demo) return;
-    api<{ languages: Row[]; groups: Row[] }>('domain-options', token)
+    api<{ languages: Row[]; groups: Row[]; providers: Row[] }>('domain-options', token)
       .then((data) => {
         setLanguages(data.languages);
         setGroups(data.groups);
+        setProviders(data.providers);
       })
       .catch((err) => setError(err.message));
   }, [demo, token]);
@@ -1223,6 +1461,9 @@ function DomainForm({
       sitemap_enabled: form.has('sitemap_enabled'),
       rss_enabled: form.has('rss_enabled'),
       manual_approval: form.has('manual_approval'),
+      provider_id: num('provider_id') || null,
+      fallback_provider_id: num('fallback_provider_id') || null,
+      priority: num('priority') || null,
     };
     try {
       if (!demo) await api(row.id ? `domains/${row.id}` : 'domains', token, row.id ? 'PATCH' : 'POST', value);
@@ -1233,7 +1474,7 @@ function DomainForm({
         ...value,
         language: language?.name ?? '',
         group_name: group?.name ?? '',
-        provider: group?.provider ?? '',
+        provider: providers.find((item) => item.id === value.provider_id)?.name ?? group?.provider ?? '',
         effective_limit: value.daily_limit ?? group?.daily_limit ?? 0,
       });
     } catch (err) {
@@ -1312,6 +1553,30 @@ function DomainForm({
           <label>
             Timezone
             <input name="timezone" defaultValue={String(row.timezone ?? 'UTC')} required />
+          </label>
+          {(['provider_id', 'fallback_provider_id'] as const).map((key) => (
+            <label key={key}>
+              {key === 'provider_id' ? 'Primary provider' : 'Fallback provider'}
+              <select key={providers.length} name={key} defaultValue={String(row[key] ?? '')}>
+                <option value="">Inherit group setting</option>
+                {providers.map((item) => (
+                  <option key={String(item.id)} value={String(item.id)}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <label>
+            Queue priority
+            <input
+              type="number"
+              name="priority"
+              min="1"
+              max="32767"
+              placeholder="Use group priority"
+              defaultValue={String(row.priority ?? '')}
+            />
           </label>
           {(
             [

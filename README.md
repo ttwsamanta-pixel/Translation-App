@@ -29,9 +29,10 @@ Use `curl.exe -H "Host: fr.ttw.test" http://127.0.0.1:3001/` on Windows to previ
 | --- | --- |
 | `NODE_ENV` | Set to `production` on the VPS. |
 | `DATABASE_URL` | MySQL connection URI with URL-encoded credentials. |
-| `REDIS_URL` | BullMQ, API rate limits, and worker heartbeat. |
+| `REDIS_URL` | BullMQ, API rate limits, worker heartbeat, and public homepage caching. |
 | `API_PORT`, `WEB_PORT`, `BIND_HOST` | Defaults are 3000, 3001, and loopback. |
 | `SOURCE_HOST` | Allowed WordPress hostname, without protocol or path. |
+| `SOURCE_SITE_ID` | Optional ID that must match the Site ID in the source WordPress connector when configured. |
 | `PILOT_HOST`, `PILOT_ORIGIN` | Optional automated pilot domain seed. Leave both unset for domain registration through the admin dashboard. |
 | `WEBHOOK_API_KEY`, `WEBHOOK_SECRET` | Independent credentials shared with the WordPress connector. Each requires at least 32 characters. |
 | `JWT_SECRET` | Independent random admin signing secret of at least 32 characters. |
@@ -42,7 +43,7 @@ Use `curl.exe -H "Host: fr.ttw.test" http://127.0.0.1:3001/` on Windows to previ
 | `ALLOW_MOCK_TRANSLATION` | Local-only mock when set to `true`. Mock article pages are labelled and excluded from feed, sitemap, and hreflang output. |
 | `WORKER_CONCURRENCY` | Maximum simultaneous translations per worker instance. Defaults to 2. |
 
-Sign in as an admin and open **Providers (APIs)**. Edit the preconfigured DeepL, Google Cloud Translation Basic v2, Gemini, or OpenAI provider, or choose **Add provider** for a separate key or model. Save the API key and enable the provider. Configure its primary or fallback role in **Translation Groups**. Keys are encrypted at rest. Saved DeepL keys take precedence over the optional environment key. Existing jobs retain their selected provider. The dashboard shows an estimate based on the rate you enter per million source characters. The Gemini and OpenAI API bills are based on token usage and may differ.
+Sign in as an admin and open **Providers (APIs)**. Edit the preconfigured DeepL, Google Cloud Translation Basic v2, Gemini, or OpenAI provider, or choose **Add provider** for a separate key or model. Save the API key and enable the provider. Configure its primary or fallback role in **Translation Groups**. Keys are encrypted at rest. Saved DeepL keys take precedence over the optional environment key. Existing jobs retain their selected provider. Optional request caps apply per minute and per UTC day, with a separate cap on concurrent requests. The dashboard shows an estimate based on the rate you enter per million source characters. The Gemini and OpenAI API bills are based on token usage and may differ.
 
 ### Project layout
 
@@ -59,8 +60,8 @@ Sign in as an admin and open **Providers (APIs)**. Edit the preconfigured DeepL,
 
 ## Connect WordPress
 
-1. Copy `wordpress-plugin/translation-connector` to `wp-content/plugins/`, then activate **TTW Translation Connector**.
-2. Add these constants in `wp-config.php` before WordPress loads. Use the same API key and HMAC secret as the backend. Use HTTPS for staging and production.
+1. Deploy the central app and apply migrations before updating the connector. Copy the entire `wordpress-plugin/translation-connector` folder to the source site's `wp-content/plugins/`. Activate **TTW Translation Connector** if needed.
+2. Open **Translation Platform → Settings**. Enter the central application URL and the backend's webhook API key and secret, then use **Test saved connection**. Existing `wp-config.php` constants take precedence and can continue to supply the connection:
 
 ```php
 define('TTW_TRANSLATION_ENDPOINT', 'https://admin.example.com/api/v1/webhooks/wordpress/article');
@@ -68,8 +69,16 @@ define('TTW_TRANSLATION_API_KEY', 'your-api-key');
 define('TTW_TRANSLATION_SECRET', 'your-hmac-secret');
 ```
 
-3. Configure WordPress cron to run regularly on the source server. After publishing a test post, review pending and failed events under **Tools → Translation Connector**. Failed deliveries can be retried there.
-4. Verify the article, job, and target page from the admin console. WordPress snapshots are signed over the exact JSON bytes and retained locally until the central API accepts them.
+3. Configure Manual, Automatic, or Disabled for the source categories. Unconfigured posts stay in WordPress until a rule applies. Use **Sync categories** to populate the central Distribution editor. Start with one Manual category, then select an eligible published post under **Translation Platform → Articles** and send it.
+4. Keep WordPress cron running regularly. Monitor **Translation Platform → Logs** and verify the accepted article, queued job, and published page in the central app. Existing pending and failed outbox entries remain available after the connector upgrade.
+
+## Manage distribution and edition design
+
+- **Distribution** controls which source categories reach each group or individual domain. Before the first rule is created, eligible domains receive all incoming categories. After that, an incoming article needs an enabled matching rule. A rule's daily quota counts distinct source articles by UTC day. A domain's quota counts new article allocations in its configured timezone. Updated translations for previously allocated articles reuse their original allocation when the destination still matches.
+- **Domains** can override the group's primary provider, fallback provider, daily limit and queue priority. A matched rule can override provider selection and queue priority for its own category. Existing translation jobs keep their assigned providers.
+- **Website** manages the shared design, logo, menus, homepage sections, static pages, videos, magazine issues, advertisements and social sharing. Save a draft, preview it with sample content, and publish the version. To roll back, load and publish a previous version. Domain overrides inherit any values left out.
+- **Localization** stores UI strings and category labels by language. Configure edition-specific media, navigation and static page copy through the domain overrides. Each enabled domain uses the shared renderer and serves the published articles in that edition. The article language selector links to available translations of that story.
+- **Users & Roles** manages access to editing, distribution, website design, account administration and read-only viewing. **Admin Activity** shows authenticated management requests and their HTTP results.
 
 ## Verification
 
@@ -79,6 +88,7 @@ npm run lint
 npm test
 npm run build
 php -l wordpress-plugin/translation-connector/translation-connector.php
+php -l wordpress-plugin/translation-connector/admin.php
 npm run smoke
 ```
 

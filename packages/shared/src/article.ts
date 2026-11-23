@@ -35,6 +35,18 @@ export const articleSchema = z.object({
     .max(16)
     .default('en'),
   articleType: z.string().max(60).default('post'),
+  siteId: z
+    .string()
+    .regex(/^[a-z0-9_-]{1,80}$/i)
+    .optional(),
+  categoryIds: z.array(z.number().int().positive()).max(100).optional(),
+  imageMetadata: z
+    .object({
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+      mime: z.string().max(100).optional(),
+    })
+    .optional(),
 });
 
 export type Article = z.infer<typeof articleSchema>;
