@@ -554,8 +554,9 @@ export class AdminController {
       rows('SELECT id,hostname name FROM domains ORDER BY hostname'),
       rows('SELECT id,name FROM translation_groups ORDER BY name'),
       rows('SELECT id,name FROM translation_providers ORDER BY name'),
-      rows(`SELECT name FROM wordpress_categories UNION DISTINCT
-        SELECT c.name FROM articles a JOIN article_versions v ON v.article_id=a.id AND v.source_hash=a.current_hash
+      rows(`SELECT CONVERT(name USING utf8mb4) COLLATE utf8mb4_0900_ai_ci AS name FROM wordpress_categories UNION DISTINCT
+        SELECT CONVERT(c.name USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
+        FROM articles a JOIN article_versions v ON v.article_id=a.id AND v.source_hash=a.current_hash
         CROSS JOIN JSON_TABLE(v.payload,'$.categories[*]' COLUMNS(name VARCHAR(200) PATH '$')) c ORDER BY name LIMIT 5000`),
     ]);
     return { rules, domains, groups, providers, categories };

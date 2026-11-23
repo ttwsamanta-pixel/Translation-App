@@ -54,7 +54,7 @@ const post = (id, raw = body, expired = false, path = 'article') => {
 async function admin(path, options) {
   const response = await fetch(api + '/api/v1/' + path, options);
   const data = await response.json();
-  assert.ok(response.ok, JSON.stringify(data));
+  assert.ok(response.ok, `${options?.method ?? 'GET'} ${path} returned ${response.status}: ${JSON.stringify(data)}`);
   return data;
 }
 async function publicPage(path, hostname = host) {

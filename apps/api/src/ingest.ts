@@ -45,8 +45,9 @@ export async function distribute(
         fallback_provider_id: number | null;
       }>(
         `SELECT id,domain_id,group_id,priority,daily_limit,provider_id,fallback_provider_id
-      FROM distribution_rules WHERE enabled=1 AND category IN (
-        SELECT name FROM JSON_TABLE(?, '$[*]' COLUMNS(name VARCHAR(200) PATH '$')) categories
+      FROM distribution_rules WHERE enabled=1 AND CONVERT(category USING utf8mb4) COLLATE utf8mb4_0900_ai_ci IN (
+        SELECT CONVERT(name USING utf8mb4) COLLATE utf8mb4_0900_ai_ci
+        FROM JSON_TABLE(?, '$[*]' COLUMNS(name VARCHAR(200) PATH '$')) categories
       ) ORDER BY priority,(domain_id IS NULL),id`,
         [JSON.stringify(article.categories)],
         conn,
