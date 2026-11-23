@@ -143,7 +143,9 @@ for (const route of ['/category/Travel', '/author/Travel%20Desk', '/search?q=tou
   assert.ok(listing.body.includes(publicPath), route);
 }
 assert.equal((await publicPage('/category/DoesNotExist')).status, 404);
-assert.ok((await publicPage('/')).body.includes(publicPath));
+const homepage = (await publicPage('/')).body;
+const latestNews = homepage.split('id="section-latest"')[1]?.split('id="section-')[0];
+assert.ok(latestNews?.includes(publicPath), 'Latest News must include the first story even when it is featured');
 const overview = await admin('overview', options);
 assert.ok(overview.jobs.some((row) => row.state === 'published'));
 assert.ok(overview.usage.some((row) => Number(row.requests) > 0));

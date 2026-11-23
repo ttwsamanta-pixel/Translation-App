@@ -156,7 +156,7 @@ function mediaCards(items: TemplateContext['design']['videos'], site: TemplateCo
 
 app.get('/', async (_request, response: PublicResponse) => {
   const domain = response.locals.domain;
-  const cacheKey = `ttw:public:home:${domain.id}:${domain.site_generation}:${domain.content_generation}`;
+  const cacheKey = `ttw:public:home:v2:${domain.id}:${domain.site_generation}:${domain.content_generation}`;
   if (cache?.status === 'ready') {
     const saved = await cache.get(cacheKey).catch(() => null);
     if (saved) {
@@ -184,11 +184,10 @@ app.get('/', async (_request, response: PublicResponse) => {
         )
       : [],
   ]);
-  const featuredCount = sections.find((section) => section.key === 'featured')?.limit ?? 0;
   const blocks = sections.map(({ key, limit }) => {
     const body = {
-      featured: () => articleCards(latest.slice(0, featuredCount), site, true),
-      latest: () => articleCards(latest.slice(featuredCount, featuredCount + limit), site),
+      featured: () => articleCards(latest.slice(0, limit), site, true),
+      latest: () => articleCards(latest.slice(0, limit), site),
       categories: () =>
         `<div class="taxonomy">${categories
           .slice(0, limit)
@@ -198,7 +197,7 @@ app.get('/', async (_request, response: PublicResponse) => {
       videos: () => mediaCards(site.design.videos.slice(0, limit), site),
       magazine: () => mediaCards(site.design.magazines.slice(0, limit), site),
     }[key]();
-    return `<section class="block"><h2 class="heading">${escape(site.labels[key])}</h2>${body}</section>`;
+    return `<section class="block" id="section-${key}"><h2 class="heading">${escape(site.labels[key])}</h2>${body}</section>`;
   });
   const availableEditions = editionAlternates(site);
   const html = renderPage(
