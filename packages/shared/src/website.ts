@@ -4,6 +4,7 @@ export const sectionKeys = ['featured', 'latest', 'categories', 'interviews', 'v
 export const englishLabels = {
   home: 'Home',
   latest: 'Latest news',
+  news: 'News',
   featured: 'Featured news',
   categories: 'Categories',
   interviews: 'Interviews',
@@ -22,6 +23,19 @@ export const englishLabels = {
   previous: 'Previous',
   notFound: 'Page not found',
   advertisement: 'Advertisement',
+  menu: 'Menu',
+  subscribe: 'Subscribe',
+  darkMode: 'Dark mode',
+  usefulLinks: 'Useful links',
+  followUs: 'Follow us',
+  contact: 'Contact us',
+  about: 'About us',
+  team: 'Our team',
+  shows: 'Shows',
+  clients: 'Clients',
+  skip: 'Skip to content',
+  readMore: 'Read more',
+  breadcrumb: 'Breadcrumb',
 };
 export const labelKeys = Object.keys(englishLabels) as [
   keyof typeof englishLabels,
@@ -56,7 +70,12 @@ const sectionSchema = z.object({
 });
 const item = z.object({ title: text, url, image: url.optional() });
 const ad = z.object({ slot: z.enum(['home-top', 'article-top']), label: text, image: url, url });
-const staticPage = z.object({ slug, title: text, content: z.string().trim().max(25000) });
+const staticPage = z.object({
+  slug,
+  title: text,
+  content: z.string().trim().max(25000),
+  format: z.enum(['text', 'html']).optional(),
+});
 const link = z.object({
   label: text,
   href: z.union([

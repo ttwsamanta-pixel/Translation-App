@@ -278,6 +278,7 @@ async function start() {
     }),
   );
   app.getHttpAdapter().getInstance().set('trust proxy', 'loopback');
+  app.use('/assets/ttw', express.static(resolve('apps/web/public/ttw'), { index: false, maxAge: '1h' }));
   const admin = resolve('admin/dist');
   if (existsSync(resolve(admin, 'index.html'))) {
     app.use(express.static(admin, { index: false }));

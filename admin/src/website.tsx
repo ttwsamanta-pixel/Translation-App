@@ -46,7 +46,7 @@ const collectionHints = {
 const fields = {
   navigation: { label: 'Label', href: 'Link' },
   footer: { label: 'Label', href: 'Link' },
-  pages: { slug: 'Page slug', title: 'Title', content: 'Page content' },
+  pages: { slug: 'Page slug', title: 'Title', format: 'Content format', content: 'Page content' },
   videos: { title: 'Title', url: 'Video URL', image: 'Image URL (optional)' },
   magazines: { title: 'Title', url: 'Magazine URL', image: 'Image URL (optional)' },
   ads: { slot: 'Placement', label: 'Image description', image: 'Image URL', url: 'Destination URL' },
@@ -83,6 +83,14 @@ function TemplateCollection({
                     <option value="">Choose placement</option>
                     <option value="home-top">Homepage</option>
                     <option value="article-top">Article</option>
+                  </select>
+                ) : field === 'format' ? (
+                  <select
+                    value={row[field] ?? 'text'}
+                    onChange={(event) => update(field, event.target.value)}
+                  >
+                    <option value="text">Plain text</option>
+                    <option value="html">HTML</option>
                   </select>
                 ) : field === 'content' ? (
                   <textarea
@@ -266,7 +274,11 @@ export function WebsiteEditor({
                   }</section>`,
               )
               .join('')}`;
-    setPreview(renderPage(context, title, content, '<meta name="robots" content="noindex">'));
+    setPreview(
+      renderPage(context, title, content, '<meta name="robots" content="noindex">', {
+        kind: previewPage === 'home' ? 'home' : previewPage === 'article' ? 'article' : 'archive',
+      }),
+    );
   }
 
   if (!token) return <p className="panel empty">Sign in to manage your website.</p>;
@@ -570,7 +582,7 @@ export function WebsiteEditor({
                   className="website-preview"
                   title="Template preview with sample content"
                   srcDoc={preview}
-                  sandbox=""
+                  sandbox="allow-same-origin"
                 />
               )}
             </div>

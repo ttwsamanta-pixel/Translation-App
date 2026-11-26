@@ -9,7 +9,8 @@ export default defineConfig({
     host: '127.0.0.1',
     proxy: {
       '/api': 'http://127.0.0.1:3000',
-      '/ready': 'http://127.0.0.1:3000'
-    }
-  }
+      '/assets/ttw': 'http://127.0.0.1:3000',
+      '/ready': 'http://127.0.0.1:3000',
+    },
+  },
 });

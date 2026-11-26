@@ -24,6 +24,7 @@ const body = JSON.stringify({
   featuredImage: 'https://' + sourceHost + '/photos/hero.jpg',
   excerpt: 'The latest travel report',
   categories: ['Travel'],
+  tags: ['Tourism'],
   author: 'Travel Desk',
   slug: 'european-tourism-report',
   publishedAt: stamp,
@@ -54,7 +55,10 @@ const post = (id, raw = body, expired = false, path = 'article') => {
 async function admin(path, options) {
   const response = await fetch(api + '/api/v1/' + path, options);
   const data = await response.json();
-  assert.ok(response.ok, `${options?.method ?? 'GET'} ${path} returned ${response.status}: ${JSON.stringify(data)}`);
+  assert.ok(
+    response.ok,
+    `${options?.method ?? 'GET'} ${path} returned ${response.status}: ${JSON.stringify(data)}`,
+  );
   return data;
 }
 async function publicPage(path, hostname = host) {
@@ -137,15 +141,34 @@ assert.match(html, /<h1>.+<\/h1>/);
 assert.equal([...html.matchAll(/<img\b[^>]*src="[^"]*\/photos\/hero\.jpg"/g)].length, 1);
 assert.match(html, /href="\/category\/Travel"/);
 assert.match(html, /href="\/author\/Travel%20Desk"/);
-for (const route of ['/category/Travel', '/author/Travel%20Desk', '/search?q=tourism', '/news']) {
+assert.match(html, /href="\/tag\/Tourism"/);
+for (const route of [
+  '/category/Travel',
+  '/author/Travel%20Desk',
+  '/tag/Tourism',
+  '/search?q=tourism',
+  '/news',
+]) {
   const listing = await publicPage(route);
   assert.equal(listing.status, 200, route);
   assert.ok(listing.body.includes(publicPath), route);
 }
 assert.equal((await publicPage('/category/DoesNotExist')).status, 404);
 const homepage = (await publicPage('/')).body;
+assert.match(homepage, /TTW-Logo\.svg/);
+assert.match(homepage, /latest-news__grid/);
+for (const asset of [
+  '/assets/ttw/uploads/TTW-Logo.svg',
+  '/assets/ttw/assets/css/home.css',
+  '/assets/ttw/edition.css',
+]) {
+  assert.equal((await publicPage(asset)).status, 200, asset);
+}
 const latestNews = homepage.split('id="section-latest"')[1]?.split('id="section-')[0];
-assert.ok(latestNews?.includes(publicPath), 'Latest News must include the first story even when it is featured');
+assert.ok(
+  latestNews?.includes(publicPath),
+  'Latest News must include the first story even when it is featured',
+);
 const overview = await admin('overview', options);
 assert.ok(overview.jobs.some((row) => row.state === 'published'));
 assert.ok(overview.usage.some((row) => Number(row.requests) > 0));
@@ -249,6 +272,7 @@ assert.ok(!(await publicPage('/')).body.includes('Verified shared template'));
 await write(`website/versions/${version.id}/publish`);
 assert.ok((await publicPage('/')).body.includes('Verified shared template'));
 assert.match((await publicPage('/page/about')).body, /Local edition information/);
+assert.match((await publicPage('/about/')).body, /Local edition information/);
 assert.match((await publicPage('/sitemap.xml')).body, /\/page\/about/);
 const override = { name: 'Verified domain override' };
 await write('website/overrides/' + domain.id, override, 'PUT');

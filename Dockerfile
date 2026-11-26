@@ -15,6 +15,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/admin/dist ./admin/dist
+COPY --from=build /app/apps/web/public ./apps/web/public
 COPY database/migrations ./database/migrations
 USER node
 CMD ["node", "dist/apps/api/src/main.js"]

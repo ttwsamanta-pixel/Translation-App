@@ -1,8 +1,7 @@
-import type { Labels, Website } from '../../../packages/shared/src/website';
+import { defaultWebsite, type Labels, type Website } from '../../../packages/shared/src/website';
 import { escape } from './seo';
 
 export type EditionLink = { name: string; code: string; url: string | null; current: boolean };
-
 export type TemplateContext = {
   code: string;
   design: Website;
@@ -11,9 +10,13 @@ export type TemplateContext = {
   editions: EditionLink[];
   categoryLabels?: Record<string, string>;
 };
+type PageLayout = { kind?: 'home' | 'article' | 'archive' | 'page'; path?: string };
 
+const assets = '/assets/ttw';
+const sourceSite = 'https://www.travelandtourworld.com';
 export const categoryPath = (name: string) => '/category/' + encodeURIComponent(name);
 export const authorPath = (name: string) => '/author/' + encodeURIComponent(name);
+export const tagPath = (name: string) => '/tag/' + encodeURIComponent(name);
 export const categoryLabel = (site: TemplateContext, name: string) =>
   site.categoryLabels && Object.hasOwn(site.categoryLabels, name) ? site.categoryLabels[name] : name;
 
@@ -24,68 +27,138 @@ export function adSlot(context: TemplateContext, slot: Website['ads'][number]['s
     : '';
 }
 
-const style = `<style>
-*{box-sizing:border-box}body{margin:0;color:#172338;background:#f5f7fa;line-height:1.55}a{color:var(--primary)}
-img{display:block;max-width:100%;height:auto}button,input{font:inherit}button{cursor:pointer}.masthead,footer{background:#fff}
-.masthead{border-top:4px solid var(--accent);border-bottom:1px solid #dce2eb}.frame{max-width:1260px;margin:auto;padding:0 24px}
-.brand-row{display:flex;gap:20px;flex-wrap:wrap;align-items:center;padding-block:20px;justify-content:space-between}
-.brand{font-size:1.4rem;text-transform:uppercase;font-weight:900;text-decoration:none;line-height:1.1}.brand img{max-width:220px;max-height:56px}
-.tools,nav,footer .frame{display:flex;align-items:center;gap:16px;flex-wrap:wrap}nav{padding-block:12px;border-top:1px solid #e7ebf1}
-nav a,footer a{font-weight:650;text-decoration:none}nav a:hover,footer a:hover{text-decoration:underline}.tools form,.search{display:flex;gap:6px}
-input,button,summary{padding:8px 10px;border:1px solid #cad4e2;background:white;border-radius:5px;color:var(--primary)}input{max-width:100%;min-width:0}
-button{background:var(--primary);border-color:var(--primary);color:white}details{position:relative}summary{cursor:pointer}
-.editions{position:absolute;z-index:2;right:0;width:min(280px,80vw);max-height:320px;overflow:auto;background:white;box-shadow:0 8px 24px #12253f22;padding:12px;border:1px solid #dce2eb}
-.editions [data-edition]{display:block;padding:5px 2px}.editions [hidden]{display:none}.editions span{color:#536279}.editions input{width:100%;margin-bottom:8px}main.frame{min-height:60vh;padding-block:25px 50px}
-h1,h2,h3{line-height:1.15}.heading{border-left:4px solid var(--accent);padding-left:12px}.block{margin:0 0 32px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
-.card{background:white;border:1px solid #dce2eb;border-radius:8px;overflow:hidden}.card img{aspect-ratio:16/9;width:100%;object-fit:cover}.card div{padding:15px}
-.card h3{margin:0 0 8px;font-size:1.1rem}.card a{text-decoration:none}.featured .card:first-child{grid-column:span 2}.featured .card:first-child h3{font-size:1.5rem}
-.taxonomy{display:flex;gap:12px;flex-wrap:wrap}.taxonomy a{background:white;border:1px solid #dce2eb;border-radius:5px;padding:8px 12px;text-decoration:none}
-article.story{max-width:960px;margin:auto;background:white;border:1px solid #dce2eb;border-radius:8px;padding:clamp(18px,4vw,42px);overflow-wrap:anywhere}
-article.story h1{font-size:clamp(1.9rem,4vw,3.35rem);margin-top:0}.story figure{margin-inline:0}.story table{display:block;overflow-x:auto}
-.story img{border-radius:5px}.meta,time{color:#536279}.demo{color:#81560d;font-weight:700}.ad{margin:16px auto;text-align:center}.ad img{margin:auto}
-.pager{display:flex;gap:20px;margin-top:25px}.share{display:flex;gap:14px;flex-wrap:wrap;margin:24px 0 0}
-footer{border-top:1px solid #dce2eb}footer .frame{padding-block:20px}.static{white-space:pre-wrap}.search input{width:min(28rem,65vw)}
-@media(max-width:720px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-row{gap:12px}.frame{padding-inline:16px}}
-@media(max-width:470px){.grid{grid-template-columns:1fr}.featured .card:first-child{grid-column:auto}.tools{gap:8px}.editions{left:0;right:auto}}
-</style>`;
-
-export function renderPage(context: TemplateContext, title: string, main: string, head: string) {
-  const { design, labels } = context;
-  const font = { system: 'system-ui,sans-serif', serif: 'Georgia,serif', sans: 'Arial,sans-serif' }[
-    design.font
-  ];
-  const branding = design.logo
-    ? `<img src="${escape(design.logo)}" alt="${escape(design.name)}">`
-    : escape(design.name);
-  const links = (items: Website['navigation']) =>
-    items.map((item) => `<a href="${escape(item.href)}">${escape(item.label)}</a>`).join('');
-  const defaults = `<a href="/">${escape(labels.home)}</a><a href="/news">${escape(labels.latest)}</a>
-    <a href="/interviews">${escape(labels.interviews)}</a><a href="/videos">${escape(labels.videos)}</a>
-    <a href="/magazine">${escape(labels.magazine)}</a>`;
+function editionMenu({ editions, design, labels }: TemplateContext) {
+  if (!editions.length) return '';
   const preferred = (item: EditionLink) => (design.popularLanguages ?? []).includes(item.code.toLowerCase());
   const editionItem = ({ url, code, name, current }: EditionLink) =>
     url
       ? `<a data-edition="${escape(code)}" href="${escape(url)}" hreflang="${escape(code)}"${current ? ' aria-current="page"' : ''}>${escape(name)}</a>`
       : `<span data-edition="${escape(code)}">${escape(name)} · ${escape(labels.unavailable)}</span>`;
-  const popular = context.editions.filter(preferred);
-  const languageForm = context.editions.length
-    ? `<details><summary>${escape(labels.languages)}</summary><div class="editions">
-       <input type="search" id="edition-search" aria-label="${escape(labels.languages)}" placeholder="${escape(labels.search)}">
-       ${popular.length ? `<strong>${escape(labels.popularLanguages)}</strong>${popular.map(editionItem).join('')}` : ''}
-       ${context.editions
-         .filter((edition) => !preferred(edition))
-         .map(editionItem)
-         .join('')}</div></details>`
-    : '';
-  return `<!doctype html><html lang="${escape(context.code)}" dir="${/^(ar|fa|he|ur|ps|sd|yi)(-|$)/i.test(context.code) ? 'rtl' : 'ltr'}">
+  const popular = editions.filter(preferred);
+  return `<details class="ttw-disclosure"><summary class="ttw-icon" aria-label="${escape(labels.languages)}">⌄</summary>
+    <div class="ttw-panel editions"><label for="edition-search">${escape(labels.languages)}</label>
+    <input type="search" id="edition-search" placeholder="${escape(labels.search)}">
+    ${popular.length ? `<strong>${escape(labels.popularLanguages)}</strong>${popular.map(editionItem).join('')}` : ''}
+    ${editions
+      .filter((edition) => !preferred(edition))
+      .map(editionItem)
+      .join('')}</div></details>`;
+}
+
+function pageLink(design: Website, slug: string) {
+  return design.pages.some((page) => page.slug === slug) ? '/' + slug : sourceSite + '/' + slug + '/';
+}
+
+function navigation({ design, labels }: TemplateContext) {
+  if (design.navigation.length) return design.navigation;
+  return [
+    { label: labels.home, href: '/' },
+    { label: labels.news, href: '/news' },
+    { label: labels.interviews, href: '/interviews' },
+    { label: labels.videos, href: '/videos' },
+    ...(
+      [
+        [labels.shows, 'shows'],
+        [labels.clients, 'clients'],
+        [labels.about, 'about-us'],
+        [labels.team, 'our-team'],
+        [labels.contact, 'contact-us'],
+      ] as const
+    ).map(([label, slug]) => ({ label, href: pageLink(design, slug) })),
+  ];
+}
+
+function header(site: TemplateContext, path?: string) {
+  const { design, labels } = site;
+  const menu = `<ul class="primary-nav__list">${navigation(site)
+    .map(
+      ({ href, label }) =>
+        `<li class="menu-item"><a href="${escape(href)}"${href === path ? ' aria-current="page"' : ''}>${escape(label)}</a></li>`,
+    )
+    .join('')}</ul>`;
+  return `<a class="skip-link" href="#primary-content">${escape(labels.skip)}</a>
+    <header class="header-main" id="header-main"><div class="container header-main__inner">
+      <div class="header-brand"><div class="site-logo"><a class="site-logo__link" href="/" rel="home">
+        <img class="site-logo__img" src="${escape(design.logo ?? assets + '/uploads/TTW-Logo.svg')}" alt="${escape(design.name)}" width="783" height="310">
+      </a></div>${editionMenu(site)}</div>
+      <nav class="primary-nav" aria-label="${escape(labels.menu)}">${menu}</nav>
+      <div class="header-actions ttw-actions">
+        <button class="ttw-icon ttw-theme-switch" type="button" aria-label="${escape(labels.darkMode)}" aria-pressed="false">☼</button>
+        <details class="ttw-disclosure ttw-search"><summary class="ttw-icon" aria-label="${escape(labels.search)}"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="2"/></svg></summary>
+          <form class="ttw-panel header-search" action="/search" role="search"><label class="screen-reader-text" for="header-search-input">${escape(labels.search)}</label>
+          <input id="header-search-input" class="header-search__input" type="search" name="q" placeholder="${escape(labels.search)}" maxlength="120" required><button class="ttw-action">${escape(labels.search)}</button></form>
+        </details>
+        ${design.pages.some((page) => page.slug === 'subscribe') ? `<a class="btn btn-download-app ttw-subscribe" href="/subscribe">${escape(labels.subscribe)}</a>` : ''}
+        <details class="ttw-disclosure ttw-mobile-nav"><summary class="ttw-icon" aria-label="${escape(labels.menu)}">☰</summary><nav class="ttw-panel" aria-label="${escape(labels.menu)}">${menu}</nav></details>
+      </div>
+    </div></header>`;
+}
+
+function footer(site: TemplateContext) {
+  const { design, labels } = site;
+  const footerLinks = design.footer.length
+    ? design.footer
+    : [
+        { label: labels.about, href: pageLink(design, 'about-us') },
+        { label: labels.contact, href: pageLink(design, 'contact-us') },
+        { label: labels.magazine, href: '/magazine' },
+      ];
+  const link = ({ href, label }: { href: string; label: string }) =>
+    `<li><a href="${escape(href)}">${escape(label)}</a></li>`;
+  return `<footer class="site-footer"><div class="container site-footer__grid">
+    <div class="footer-col footer-col--brand"><a class="footer-logo-badge" href="/"><img
+      src="${escape(design.logo ?? assets + '/uploads/TTW-Logo.svg')}" alt="${escape(design.name)}" width="783" height="310" loading="lazy"></a></div>
+    <nav class="footer-col footer-col--links" aria-label="${escape(labels.usefulLinks)}"><h2 class="footer-col__title">${escape(labels.usefulLinks)}</h2>
+    <ul class="footer-links">${footerLinks.map(link).join('')}${site.rss ? link({ href: '/feed/', label: labels.feed }) : ''}</ul></nav>
+    <nav class="footer-col" aria-label="${escape(labels.news)}"><h2 class="footer-col__title">${escape(labels.news)}</h2>
+    <ul class="footer-links">${[
+      { href: '/news', label: labels.latest },
+      { href: '/categories', label: labels.categories },
+      { href: '/interviews', label: labels.interviews },
+      { href: '/videos', label: labels.videos },
+    ]
+      .map(link)
+      .join('')}</ul></nav>
+    <div class="footer-col footer-col--social"><h2 class="footer-col__title">${escape(labels.followUs)}</h2>
+    <ul class="footer-links">${[
+      { href: 'https://www.linkedin.com/company/travel-and-tour-world', label: 'LinkedIn' },
+      { href: 'https://www.facebook.com/ttwemagazine', label: 'Facebook' },
+      { href: 'https://www.instagram.com/travelandtourworld', label: 'Instagram' },
+      { href: 'https://www.youtube.com/user/TravelAndTourWorld', label: 'YouTube' },
+    ]
+      .map(link)
+      .join('')}</ul></div></div>
+    <div class="site-footer__bottom"><div class="container site-footer__bottom-inner">© ${new Date().getUTCFullYear()} ${escape(design.name)}</div></div></footer>`;
+}
+
+export function renderPage(
+  site: TemplateContext,
+  title: string,
+  main: string,
+  head: string,
+  layout: PageLayout = {},
+) {
+  const { design } = site;
+  const routeStyle = { home: 'home', article: 'single', archive: 'category', page: 'page' }[
+    layout.kind ?? 'page'
+  ];
+  const theme = ['fonts', 'header', 'typography', 'footer', routeStyle]
+    .map((file) => `<link rel="stylesheet" href="${assets}/assets/css/${file}.css">`)
+    .join('');
+  const font = { system: '', serif: 'Georgia,serif', sans: 'Arial,sans-serif' }[design.font];
+  const custom = [
+    design.primary !== defaultWebsite.primary && `--ttw-blue:${design.primary}`,
+    design.accent !== defaultWebsite.accent && `--ttw-red:${design.accent}`,
+    font && `font-family:${font}`,
+  ]
+    .filter(Boolean)
+    .join(';');
+  return `<!doctype html><html lang="${escape(site.code)}" dir="${/^(ar|fa|he|ur|ps|sd|yi)(-|$)/i.test(site.code) ? 'rtl' : 'ltr'}">
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escape(title)}</title>${head}${style}<script src="/assets/editions.js" defer></script></head>
-    <body style="--primary:${design.primary};--accent:${design.accent};font-family:${font}">
-    <header class="masthead"><div class="frame"><div class="brand-row"><a class="brand" href="/">${branding}</a>
-    <div class="tools">${languageForm}<form action="/search"><input type="search" name="q" aria-label="${escape(labels.search)}" placeholder="${escape(labels.search)}" required maxlength="120"><button>${escape(labels.search)}</button></form></div></div>
-    <nav>${design.navigation.length ? links(design.navigation) : defaults}</nav></div></header><main class="frame">${main}</main>
-    <footer><div class="frame"><strong>${escape(design.name)}</strong>${links(design.footer)}
-    ${context.rss ? `<a href="/feed/">${escape(labels.feed)}</a>` : ''}</div></footer></body></html>`;
+    <title>${escape(title)}</title>${head}${theme}<link rel="stylesheet" href="${assets}/edition.css"><script src="/assets/editions.js" defer></script></head>
+    <body class="ttw-edition ttw-edition--${layout.kind ?? 'page'}"${custom ? ` style="${custom}"` : ''}>
+    ${header(site, layout.path)}<main id="primary-content" class="site-main"><div class="container ttw-content">${main}</div></main>
+    ${footer(site)}</body></html>`;
 }
 
 export const editionScript = `
@@ -95,4 +168,29 @@ if (search) search.addEventListener('input', () => {
   for (const option of search.parentElement.querySelectorAll('[data-edition]')) {
     option.hidden = !(option.textContent + ' ' + option.dataset.edition).toLocaleLowerCase().includes(query);
   }
-});`;
+});
+const themeSwitch = document.querySelector('.ttw-theme-switch');
+if (themeSwitch) {
+  const setTheme = (dark) => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    themeSwitch.setAttribute('aria-pressed', String(dark));
+    themeSwitch.textContent = dark ? '☾' : '☼';
+  };
+  try { setTheme(localStorage.getItem('ttw-theme') === 'dark'); } catch {}
+  themeSwitch.addEventListener('click', () => {
+    const dark = document.documentElement.dataset.theme !== 'dark';
+    setTheme(dark);
+    try { localStorage.setItem('ttw-theme', dark ? 'dark' : 'light'); } catch {}
+  });
+}
+for (const carousel of document.querySelectorAll('[data-ttw-carousel]')) {
+  const slides = [...carousel.querySelectorAll('.news-carousel__slide')];
+  let index = 0;
+  carousel.querySelectorAll('[data-step]').forEach((button) => button.addEventListener('click', () => {
+    slides[index].classList.remove('is-active');
+    slides[index].hidden = true;
+    index = (index + Number(button.dataset.step) + slides.length) % slides.length;
+    slides[index].hidden = false;
+    slides[index].classList.add('is-active');
+  }));
+}`;
