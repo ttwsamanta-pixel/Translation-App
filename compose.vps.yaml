@@ -92,6 +92,7 @@ services:
     command: ["node", "dist/apps/web/src/main.js"]
     environment:
       <<: [*database-env, *queue-env]
+      SOURCE_HOST: ${SOURCE_HOST:?Set SOURCE_HOST}
       BIND_HOST: 0.0.0.0
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-8201}:3001"

@@ -7,7 +7,7 @@ export async function distribute(
   conn: PoolConnection,
   id: number,
   hash: string,
-  article: Pick<Article, 'language' | 'categories'>,
+  article: Pick<Article, 'language' | 'categories' | 'articleType'>,
   target?: number,
 ) {
   const domains = await rows<{
@@ -29,11 +29,14 @@ export async function distribute(
     [target ?? null, target ?? null],
     conn,
   );
-  const [configuration] = await rows<{ configured: number }>(
-    'SELECT EXISTS(SELECT 1 FROM distribution_rules) configured',
-    [],
-    conn,
-  );
+  const staticPage = article.articleType === 'page';
+  const [configuration] = staticPage
+    ? [{ configured: 0 }]
+    : await rows<{ configured: number }>(
+        'SELECT EXISTS(SELECT 1 FROM distribution_rules) configured',
+        [],
+        conn,
+      );
   const rules = configuration.configured
     ? await rows<{
         id: number;
@@ -78,7 +81,7 @@ export async function distribute(
       continue;
     }
     let selected = matching[0];
-    if (!prior) {
+    if (!prior && !staticPage) {
       const day = localDay(date, domain.timezone);
       await execute(
         'INSERT IGNORE INTO daily_allocations (domain_id,local_day) VALUES (?,?)',
@@ -174,12 +177,13 @@ export async function storeArticle(
   if (receipt.article_id) return { articleId: receipt.article_id, created: 0, duplicate: true };
 
   const hash = contentHash(article);
+  const type = article.articleType === 'page' ? 'page' : 'post';
   const published = new Date(article.publishedAt);
   const modified = new Date(article.modifiedAt);
   const insert = await execute(
     `INSERT INTO articles
-      (source_host,source_post_id,current_hash,title,canonical,category,status,published_at,modified_at)
-      VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)`,
+      (source_host,source_post_id,current_hash,title,canonical,category,status,published_at,modified_at,content_type)
+      VALUES (?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)`,
     [
       article.sourceHost,
       article.postId,
@@ -190,6 +194,7 @@ export async function storeArticle(
       article.status,
       published,
       modified,
+      type,
     ],
     conn,
   );
@@ -209,10 +214,15 @@ export async function storeArticle(
   );
   if (current.current_hash === hash && !snapshot.affectedRows) {
     await execute('UPDATE articles SET modified_at=? WHERE id=?', [modified, id], conn);
-    return { articleId: id, created: 0, unchanged: true };
+    return {
+      articleId: id,
+      created:
+        type === 'page' && article.status === 'publish' ? await distribute(conn, id, hash, article) : 0,
+      unchanged: true,
+    };
   }
   await execute(
-    `UPDATE articles SET current_hash=?,title=?,canonical=?,category=?,status=?,published_at=?,modified_at=? WHERE id=?`,
+    `UPDATE articles SET current_hash=?,title=?,canonical=?,category=?,status=?,published_at=?,modified_at=?,content_type=? WHERE id=?`,
     [
       hash,
       article.title,
@@ -221,6 +231,7 @@ export async function storeArticle(
       article.status,
       published,
       modified,
+      type,
       id,
     ],
     conn,

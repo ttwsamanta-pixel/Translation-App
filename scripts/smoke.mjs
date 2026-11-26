@@ -309,6 +309,32 @@ assert.ok(
   (await (await post(batchId, batch, false, 'articles/bulk')).json()).results.every((item) => item.duplicate),
 );
 assert.equal(Number((await admin('distribution/rules', options)).rules[0].used), 1);
+await saveDomain({ daily_limit: 0 });
+const copyPage = JSON.stringify({
+  ...JSON.parse(newPost('8')),
+  canonical: 'https://' + sourceHost + '/company/about-us/',
+  articleType: 'page',
+  categories: [],
+  title: 'About our travel edition',
+  content:
+    '<p>Information about this travel edition.</p><p><a href="/news/">News</a> <a href="/unavailable/">Unavailable destination</a></p>',
+});
+const submittedPage = await post(randomUUID(), copyPage);
+assert.equal(submittedPage.status, 202);
+const staticJob = await submittedPage.json();
+assert.equal(staticJob.created, 1, 'Page publication is independent of the article quota and category rules');
+const staticTranslation = (await awaitTranslation(staticJob.articleId, 'published')).translation;
+const staticPath = '/page/' + encodeURIComponent(staticTranslation.slug);
+const staticView = await publicPage(staticPath);
+assert.equal(staticView.status, 200);
+assert.match(staticView.body, /default-page-content__body/);
+assert.ok(staticView.body.includes('href="/news"'));
+assert.ok(!staticView.body.includes('/unavailable/'));
+assert.equal((await publicPage('/company/about-us/')).status, 200);
+assert.equal((await publicPage('/article/' + encodeURIComponent(staticTranslation.slug))).status, 404);
+assert.ok((await publicPage('/pages')).body.includes(staticPath));
+assert.ok(!(await publicPage('/news')).body.includes(staticPath));
+await saveDomain({});
 const viewer = await write('users', {
   email: `viewer-${postId}@example.test`,
   password: 'a-local-smoke-password',

@@ -141,7 +141,8 @@ export async function runJob(job: Job<Work>, redis: IORedis) {
 
   try {
     const parts = htmlSegments(task.payload.content);
-    if (!parts.segments.length) throw new ProviderError('empty_article', false);
+    const isPage = task.payload.articleType === 'page';
+    if (!isPage && !parts.segments.length) throw new ProviderError('empty_article', false);
     const values = [
       task.payload.title,
       task.payload.excerpt,
@@ -172,7 +173,8 @@ export async function runJob(job: Job<Work>, redis: IORedis) {
       translated = await translate(fallback, task, values, true, redis);
     }
     const [title, excerpt, seoTitle, description, ...content] = translated;
-    if (!title.trim() || !content.join('').trim()) throw new ProviderError('empty_translation', false);
+    if (!title.trim() || (!isPage && !content.join('').trim()))
+      throw new ProviderError('empty_translation', false);
 
     await transaction(async (conn) => {
       await rows('SELECT id FROM articles WHERE id=? FOR UPDATE', [task.article_id], conn);

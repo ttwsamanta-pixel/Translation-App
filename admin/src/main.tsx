@@ -92,6 +92,7 @@ const columns: Record<string, [string, string][]> = {
     ['id', 'ID'],
     ['title', 'Title'],
     ['category', 'Category'],
+    ['content_type', 'Type'],
     ['status', 'Status'],
     ['published_at', 'Published'],
   ],

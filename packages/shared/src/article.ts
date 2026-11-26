@@ -1,14 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-
-export function normalizeHost(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/:\d+$/, '')
-    .replace(/\.$/, '')
-    .replace(/^www\./, '');
-}
+import { normalizeHost } from './host';
+export { normalizeHost } from './host';
 
 const httpUrl = z.url({ protocol: /^https?$/ }).max(1500);
 export const articleSchema = z.object({

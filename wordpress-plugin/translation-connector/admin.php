@@ -34,6 +34,8 @@ function ttw_translation_begin($title) {
         'invalid_site' => 'The site ID may only contain letters, numbers, underscores, or hyphens.',
         'categories_synced' => sprintf('%d categories synced.', absint($_GET['synced'] ?? 0)),
         'invalid_category_sync' => 'Category sync failed. Test the saved connection and verify the central app is up to date.',
+        'pages_synced' => 'Published pages are being queued for translation. Check Logs and the central Translation Jobs screen.',
+        'invalid_page_sync' => 'WordPress could not schedule the page sync.',
         'manual' => sprintf('%d queued, %d unchanged, %d skipped.',
             absint($_GET['queued'] ?? 0), absint($_GET['unchanged'] ?? 0), absint($_GET['skipped'] ?? 0)),
     );
@@ -48,11 +50,46 @@ add_action('admin_menu', function () {
     add_menu_page('Translation Platform', 'Translation Platform', 'manage_options', $root, 'ttw_translation_dashboard', 'dashicons-translation');
     add_submenu_page($root, 'Dashboard', 'Dashboard', 'manage_options', $root, 'ttw_translation_dashboard');
     add_submenu_page($root, 'Articles', 'Articles', 'manage_options', 'ttw-translation-articles', 'ttw_translation_articles');
+    add_submenu_page($root, 'Website pages', 'Website pages', 'manage_options', 'ttw-translation-pages', 'ttw_translation_pages');
     add_submenu_page($root, 'Settings', 'Settings', 'manage_options', 'ttw-translation-settings', 'ttw_translation_settings_page');
     add_submenu_page($root, 'Sent Articles', 'Sent Articles', 'manage_options', 'ttw-translation-sent', function () { ttw_translation_logs(true); });
     add_submenu_page($root, 'Logs', 'Logs', 'manage_options', 'ttw-translation-logs', function () { ttw_translation_logs(false); });
     add_management_page('Translation Connector', 'Translation Connector', 'manage_options', $root, function () { ttw_translation_logs(false); });
 });
+
+function ttw_translation_pages() {
+    ttw_translation_begin('Website pages');
+    echo '<p>Send published pages to each enabled language edition. Each translation follows that edition’s approval setting.</p>';
+    ttw_translation_post_form('ttw_translation_sync_pages', 'Translate all published pages');
+    echo '<p><a href="' . esc_url(admin_url('edit.php?post_type=page')) . '">Choose individual pages from the WordPress Pages list</a></p></div>';
+}
+
+add_action('admin_post_ttw_translation_sync_pages', function () {
+    ttw_translation_admin_guard('ttw_translation_sync_pages');
+    $args = array(get_current_user_id(), 0);
+    $scheduled = wp_next_scheduled('ttw_translation_sync_pages', $args)
+        || wp_schedule_single_event(time() + 5, 'ttw_translation_sync_pages', $args);
+    ttw_translation_admin_redirect('ttw-translation-pages', array('ttw_notice' => $scheduled ? 'pages_synced' : 'invalid_page_sync'));
+});
+
+add_filter('bulk_actions-edit-page', function ($actions) {
+    if (current_user_can('manage_options')) { $actions['ttw_translate_pages'] = 'Send pages to Translation Platform'; }
+    return $actions;
+});
+add_filter('handle_bulk_actions-edit-page', function ($redirect, $action, $ids) {
+    if (!current_user_can('manage_options') || $action !== 'ttw_translate_pages') { return $redirect; }
+    $counts = array('queued' => 0, 'unchanged' => 0, 'skipped' => 0);
+    foreach (array_unique(array_map('absint', $ids)) as $id) {
+        $post = get_post($id);
+        if (!$post || $post->post_type !== 'page' || $post->post_status !== 'publish' || $post->post_password !== '' || !current_user_can('edit_post', $id)) {
+            ++$counts['skipped'];
+            continue;
+        }
+        $result = ttw_translation_enqueue($post, 'publish', 'page', true);
+        ++$counts[$result === 'failed' ? 'skipped' : $result];
+    }
+    return ttw_translation_admin_url('ttw-translation-pages', array_merge($counts, array('ttw_notice' => 'manual')));
+}, 10, 3);
 
 function ttw_translation_dashboard() {
     global $wpdb;

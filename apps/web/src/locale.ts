@@ -2,6 +2,7 @@ import { englishLabels, type Labels } from '../../../packages/shared/src/website
 
 const translations: Record<string, Partial<Labels>> = {
   fr: {
+    pages: 'Pages',
     news: 'Actualités',
     menu: 'Menu',
     subscribe: 'S’abonner',
@@ -38,6 +39,7 @@ const translations: Record<string, Partial<Labels>> = {
     feed: 'Flux RSS',
   },
   hy: {
+    pages: 'Էջեր',
     news: 'Նորություններ',
     menu: 'Ցանկ',
     subscribe: 'Բաժանորդագրվել',

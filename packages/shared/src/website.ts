@@ -36,6 +36,7 @@ export const englishLabels = {
   skip: 'Skip to content',
   readMore: 'Read more',
   breadcrumb: 'Breadcrumb',
+  pages: 'Pages',
 };
 export const labelKeys = Object.keys(englishLabels) as [
   keyof typeof englishLabels,

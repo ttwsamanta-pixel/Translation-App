@@ -18,9 +18,12 @@ import {
   authorPath,
   categoryLabel,
   categoryPath,
+  editionHref,
   editionScript,
+  pagePath,
   renderPage,
   tagPath,
+  sourcePath,
   TemplateContext,
 } from './template';
 
@@ -93,7 +96,9 @@ app.use(async (request, response: PublicResponse, next) => {
 const storyTables = `FROM article_translations t JOIN articles a ON a.id=t.article_id
   JOIN translation_jobs j ON j.id=t.job_id JOIN article_versions v ON v.article_id=t.article_id AND v.source_hash=j.source_hash`;
 const published = "WHERE t.domain_id=? AND t.state='published' AND a.status='publish'";
-const source = storyTables + ' ' + published;
+const source = storyTables + ' ' + published + " AND a.content_type='post'";
+const pageSource = storyTables + ' ' + published + " AND a.content_type='page'";
+const sourceHost = normalizeHost(process.env.SOURCE_HOST || 'travelandtourworld.com');
 const fields = 'SELECT t.*,a.published_at,v.payload ';
 type Card = Pick<Published, 'slug' | 'title' | 'published_at' | 'mock'> & {
   image: string;
@@ -108,7 +113,7 @@ const tagMatch = "JSON_CONTAINS(JSON_EXTRACT(v.payload,'$.tags'), JSON_QUOTE(?))
 const interviewMatch = `(JSON_UNQUOTE(JSON_EXTRACT(v.payload,'$.articleType'))='interview' OR ${categoryMatch})`;
 
 async function context(domain: Domain, article?: Published): Promise<TemplateContext> {
-  const [settings, editions] = await Promise.all([
+  const [settings, editions, pages] = await Promise.all([
     websiteSettings(domain),
     rows<{ id: number; name: string; code: string; origin: string; slug: string | null }>(
       `SELECT d.id,l.name,l.code,d.origin,t.slug FROM domains d JOIN languages l ON l.id=d.language_id
@@ -118,6 +123,10 @@ async function context(domain: Domain, article?: Published): Promise<TemplateCon
       ORDER BY (d.id=?) DESC,l.name,d.id`,
       [article?.article_id ?? null, domain.id, domain.id],
     ),
+    rows<NonNullable<TemplateContext['pages']>[number]>(
+      `SELECT t.slug,t.title,t.mock,a.canonical ${pageSource} ORDER BY t.title,t.id`,
+      [domain.id],
+    ),
   ]);
   return {
     code: domain.code,
@@ -125,13 +134,50 @@ async function context(domain: Domain, article?: Published): Promise<TemplateCon
     design: settings.design,
     labels: publicLabels(domain.code, settings.translations?.labels),
     categoryLabels: settings.translations?.categories,
+    sourceHost,
+    pages,
     editions: editions.map((item) => ({
       name: item.name,
       code: item.code,
-      url: item.slug ? item.origin + articlePath(item.slug) : article ? null : item.origin + '/',
+      url: item.slug
+        ? item.origin +
+          (article?.payload.articleType === 'page' ? pagePath(item.slug) : articlePath(item.slug))
+        : article
+          ? null
+          : item.origin + '/',
       current: item.id === domain.id,
     })),
   };
+}
+
+async function localizedContent(
+  domain: Domain,
+  site: TemplateContext,
+  html: string,
+  base: string,
+  mock: number,
+) {
+  const targets = linkTargets(html, base);
+  const mapped = targets.length
+    ? await rows<{ canonical: string; slug: string; content_type: 'post' | 'page' }>(
+        `SELECT a.canonical,t.slug,a.content_type FROM article_translations t JOIN articles a ON a.id=t.article_id
+     WHERE t.domain_id=? AND t.state='published' AND a.status='publish' AND (t.mock=0 OR ?=1) AND a.source_host=?
+       AND BINARY a.canonical IN (SELECT BINARY value FROM JSON_TABLE(?, '$[*]' COLUMNS(value VARCHAR(1500) PATH '$')) targets)`,
+        [domain.id, mock, normalizeHost(new URL(base).hostname), JSON.stringify(targets)],
+      )
+    : [];
+  const destinations = new Map(
+    mapped.map((item) => [
+      sourcePath(new URL(item.canonical).pathname),
+      item.content_type === 'page' ? pagePath(item.slug) : articlePath(item.slug),
+    ]),
+  );
+  const host = normalizeHost(new URL(base).hostname);
+  return rewriteLinks(html, base, new Map(), (href) => {
+    const url = new URL(href);
+    const localized = normalizeHost(url.hostname) === host && destinations.get(sourcePath(url.pathname));
+    return localized ? localized + url.search + url.hash : editionHref(site, href);
+  });
 }
 
 function editionAlternates(site: TemplateContext) {
@@ -155,7 +201,15 @@ function articleCards(items: Card[], site: TemplateContext, featured = false) {
     .join('')}</div>`;
 }
 
-function mediaCards(items: TemplateContext['design']['videos'], site: TemplateContext) {
+function editionMedia(items: TemplateContext['design']['videos'], site: TemplateContext) {
+  return items.flatMap((item) => {
+    const url = editionHref(site, item.url);
+    return url ? [{ ...item, url }] : [];
+  });
+}
+
+function mediaCards(sourceItems: TemplateContext['design']['videos'], site: TemplateContext) {
+  const items = editionMedia(sourceItems, site);
   return items.length
     ? `<div class="grid">${items
         .map(
@@ -245,7 +299,7 @@ function newsHero(items: Card[], site: TemplateContext, featured: number) {
 }
 
 function magazineSidebar(site: TemplateContext) {
-  const issue = site.design.magazines[0];
+  const [issue] = editionMedia(site.design.magazines, site);
   if (!issue) return '';
   return `<aside class="ttw-sidebar"><section class="ttw-sidebar-box"><h2><a href="/magazine">${escape(site.labels.magazine)}</a></h2>
     <a href="${escape(issue.url)}">${issue.image ? `<img src="${escape(issue.image)}" alt="" loading="lazy">` : ''}<h3>${escape(issue.title)}</h3></a></section></aside>`;
@@ -253,7 +307,7 @@ function magazineSidebar(site: TemplateContext) {
 
 app.get('/', async (_request, response: PublicResponse) => {
   const domain = response.locals.domain;
-  const cacheKey = `ttw:public:home:ttw4:${domain.id}:${domain.site_generation}:${domain.content_generation}`;
+  const cacheKey = `ttw:public:home:ttw4-pages:${domain.id}:${domain.site_generation}:${domain.content_generation}`;
   if (cache?.status === 'ready') {
     const saved = await cache.get(cacheKey).catch(() => null);
     if (saved) {
@@ -270,7 +324,7 @@ app.get('/', async (_request, response: PublicResponse) => {
     sections.some(({ key }) => key === 'categories')
       ? rows<{ name: string }>(
           `SELECT c.name ${storyTables} CROSS JOIN ${categoryTable} c
-        ${published} AND c.name<>'' GROUP BY c.name ORDER BY COUNT(*) DESC,c.name LIMIT 40`,
+        ${published} AND a.content_type='post' AND c.name<>'' GROUP BY c.name ORDER BY COUNT(*) DESC,c.name LIMIT 40`,
           [domain.id],
         )
       : [],
@@ -298,7 +352,7 @@ app.get('/', async (_request, response: PublicResponse) => {
           .join('')}</div>`,
       interviews: () => articleCards(interviews.slice(0, limit), site),
       videos: () => {
-        const videos = site.design.videos.slice(0, 7);
+        const videos = editionMedia(site.design.videos, site).slice(0, 7);
         if (!videos.length) return '';
         const banners = Math.min(3, Math.max(1, videos.length - 4));
         return `<div class="ttw-video-grid">${leadCarousel(videos.slice(0, banners), site)}
@@ -413,7 +467,7 @@ app.get('/categories', async (_request, response: PublicResponse) => {
     context(domain),
     rows<{ name: string }>(
       `SELECT DISTINCT c.name ${storyTables} CROSS JOIN ${categoryTable} c
-      ${published} AND c.name<>'' ORDER BY c.name LIMIT 1000`,
+      ${published} AND a.content_type='post' AND c.name<>'' ORDER BY c.name LIMIT 1000`,
       [domain.id],
     ),
   ]);
@@ -435,15 +489,68 @@ app.get('/categories', async (_request, response: PublicResponse) => {
 
 async function editionPage(request: express.Request, response: PublicResponse) {
   const domain = response.locals.domain;
-  const site = await context(domain);
-  const page = site.design.pages.find((item) => item.slug === request.params.slug);
-  const path = request.path.replace(/\/$/, '');
+  let site = await context(domain);
+  const path = sourcePath(request.path);
+  const page = site.design.pages.find(
+    (item) => item.slug === request.params.slug || path === '/' + item.slug,
+  );
   const videos = path === '/videos';
   const magazine = ['/magazine', '/magazines', '/magazine-archive'].includes(path);
+  const available = site.pages?.find(
+    (item) =>
+      path === pagePath(item.slug) ||
+      request.params.slug === item.slug ||
+      sourcePath(new URL(item.canonical).pathname) === path,
+  );
+  if (
+    !page &&
+    available &&
+    ((!videos && !magazine) || !(videos ? site.design.videos.length : site.design.magazines.length))
+  ) {
+    const [translated] = await rows<Published>(fields + pageSource + ' AND t.slug=? LIMIT 1', [
+      domain.id,
+      available.slug,
+    ]);
+    if (translated) {
+      site = await context(domain, translated);
+      const local = pagePath(translated.slug);
+      const body = await localizedContent(
+        domain,
+        site,
+        translated.content,
+        translated.payload.canonical,
+        translated.mock,
+      );
+      response.send(
+        renderPage(
+          site,
+          translated.seo_title,
+          `<article class="default-page-content">${breadcrumbs(site, translated.title)}
+          <header class="default-page-content__header"><h1>${escape(translated.title)}</h1></header>
+          <div class="default-page-content__body">${body}</div></article>`,
+          links(domain.origin + local, translated.mock ? [] : editionAlternates(site)) +
+            `<meta name="description" content="${escape(translated.seo_description)}">` +
+            (translated.mock ? '<meta name="robots" content="noindex,nofollow">' : ''),
+          { kind: 'page', path: local },
+        ),
+      );
+      return;
+    }
+  }
   if (!videos && !magazine && !page) return redirect(request, response);
   const title = page?.title ?? (videos ? site.labels.videos : site.labels.magazine);
   const content = page
-    ? `<div class="default-page-content__body${page.format === 'html' ? '' : ' static'}">${page.format === 'html' ? sanitizeArticle(page.content) : escape(page.content)}</div>`
+    ? `<div class="default-page-content__body${page.format === 'html' ? '' : ' static'}">${
+        page.format === 'html'
+          ? await localizedContent(
+              domain,
+              site,
+              sanitizeArticle(page.content),
+              'https://' + sourceHost + '/' + page.slug + '/',
+              0,
+            )
+          : escape(page.content)
+      }</div>`
     : mediaCards(videos ? site.design.videos : site.design.magazines, site);
   response.send(
     renderPage(
@@ -457,6 +564,26 @@ async function editionPage(request: express.Request, response: PublicResponse) {
   );
 }
 app.get(['/videos', '/magazine', '/magazines', '/magazine-archive', '/page/:slug'], editionPage);
+
+app.get('/pages', async (_request, response: PublicResponse) => {
+  const domain = response.locals.domain;
+  const site = await context(domain);
+  const pages = new Map([...site.design.pages, ...(site.pages ?? [])].map((page) => [page.slug, page.title]));
+  const body = [...pages]
+    .map(([slug, title]) => `<li><a href="${pagePath(slug)}">${escape(title)}</a></li>`)
+    .join('');
+  response.send(
+    renderPage(
+      site,
+      site.labels.pages,
+      `<article class="default-page-content">
+    <header class="default-page-content__header"><h1>${escape(site.labels.pages)}</h1></header>
+    ${body ? `<ul class="taxonomy">${body}</ul>` : `<p>${escape(site.labels.empty)}</p>`}</article>`,
+      links(domain.origin + '/pages', []),
+      { kind: 'page', path: '/pages' },
+    ),
+  );
+});
 
 app.get('/article/:slug', async (request, response: PublicResponse) => {
   const domain = response.locals.domain;
@@ -477,20 +604,7 @@ app.get('/article/:slug', async (request, response: PublicResponse) => {
       { code: payload.language, url: payload.canonical },
       { code: 'x-default', url: payload.canonical },
     );
-  const mapped = await rows<{ canonical: string; slug: string }>(
-    `SELECT a.canonical,t.slug
-    FROM article_translations t JOIN articles a ON a.id=t.article_id WHERE t.domain_id=? AND t.state='published' AND a.status='publish'
-    AND (t.mock=0 OR ?=1) AND a.source_host=? AND BINARY a.canonical IN (
-      SELECT BINARY value FROM JSON_TABLE(?, '$[*]' COLUMNS(value VARCHAR(1500) PATH '$')) link_targets
-    )`,
-    [
-      domain.id,
-      article.mock,
-      payload.sourceHost,
-      JSON.stringify(linkTargets(article.content, payload.canonical)),
-    ],
-  );
-  const mapping = new Map(mapped.map((item) => [item.canonical.replace(/\/$/, ''), articlePath(item.slug)]));
+  const body = await localizedContent(domain, site, article.content, payload.canonical, article.mock);
   const image =
     payload.featuredImage && !firstImageMatches(article.content, payload.featuredImage, payload.canonical)
       ? `<img class="lead" src="${escape(payload.featuredImage)}" alt="${escape(payload.imageAlt)}" decoding="async">`
@@ -519,7 +633,7 @@ app.get('/article/:slug', async (request, response: PublicResponse) => {
     <h1>${escape(article.title)}</h1>${article.mock ? `<p class="demo">${escape(site.labels.demo)}</p>` : ''}
     <p class="meta">${payload.author ? `<a href="${authorPath(payload.author)}">${escape(payload.author)}</a> · ` : ''}
     <time datetime="${article.published_at.toISOString()}">${new Intl.DateTimeFormat(domain.code, { dateStyle: 'long', timeZone: 'UTC' }).format(article.published_at)}</time></p></header>
-    ${image}<div class="single-news-content ttw-story-body">${rewriteLinks(article.content, payload.canonical, mapping)}</div>
+    ${image}<div class="single-news-content ttw-story-body">${body}</div>
     ${payload.tags.length ? `<div class="taxonomy">${payload.tags.map((name) => `<a href="${tagPath(name)}">${escape(name)}</a>`).join('')}</div>` : ''}
     ${sharing}</article>${sidebar}</div>
     ${related.length ? `<section class="block"><h2 class="heading">${escape(site.labels.related)}</h2>${articleCards(related, site)}</section>` : ''}`;
@@ -570,7 +684,7 @@ app.get(['/sitemap.xml', '/news-sitemap.xml'], async (request, response: PublicR
     ${news ? `<news:news><news:publication><news:name>Travel And Tour World</news:name><news:language>${escape(domain.code.split('-')[0])}</news:language></news:publication><news:publication_date>${article.published_at.toISOString()}</news:publication_date><news:title>${escape(article.title)}</news:title></news:news>` : ''}</url>`,
   );
   if (!news) {
-    const { design } = await websiteSettings(domain);
+    const site = await context(domain);
     const pages = [
       '/',
       '/news',
@@ -578,7 +692,9 @@ app.get(['/sitemap.xml', '/news-sitemap.xml'], async (request, response: PublicR
       '/interviews',
       '/videos',
       '/magazine',
-      ...design.pages.map((page) => '/page/' + page.slug),
+      '/pages',
+      ...site.design.pages.map((page) => pagePath(page.slug)),
+      ...(site.pages?.filter((page) => !page.mock).map((page) => pagePath(page.slug)) ?? []),
     ];
     urls.unshift(...pages.map((path) => `<url><loc>${escape(domain.origin + path)}</loc></url>`));
     urls.length = Math.min(urls.length, 50000);
@@ -645,8 +761,7 @@ async function redirect(request: express.Request, response: PublicResponse) {
     );
 }
 
-app.get('/:slug', editionPage);
-app.get(/.*/, redirect);
+app.get(/.*/, editionPage);
 app.use((error: Error, _request: express.Request, response: express.Response, next: express.NextFunction) => {
   console.error(JSON.stringify({ event: 'public_request_error', type: error.name }));
   if (response.headersSent) {

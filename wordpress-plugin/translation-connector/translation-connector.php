@@ -2,7 +2,7 @@
 /**
  * Plugin Name: TTW Translation Connector
  * Description: Sends signed article events to the central TTW translation platform.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Requires at least: 6.1
  * Requires PHP: 7.4
  */
@@ -57,6 +57,7 @@ add_action('plugins_loaded', function () {
 
 register_deactivation_hook(__FILE__, function () {
     wp_clear_scheduled_hook('ttw_translation_outbox_run');
+    wp_unschedule_hook('ttw_translation_sync_pages');
 });
 
 function ttw_translation_settings() {
@@ -136,11 +137,16 @@ function ttw_translation_payload($post, $status) {
     if (is_wp_error($categories)) { $categories = array(); }
     $categories = array_slice($categories, 0, 100);
     $metadata = $image && $settings['image'] ? wp_get_attachment_metadata($image) : array();
+    $content = $post->post_content;
+    if ($post->post_type === 'page') {
+        $content = $status === 'withdrawn' ? '' : strip_shortcodes($content);
+        if ($content !== '' && !has_blocks($content)) { $content = wpautop($content); }
+    }
     $payload = array(
         'postId' => (string) $post_id,
         'sourceHost' => wp_parse_url(home_url(), PHP_URL_HOST),
         'title' => html_entity_decode(wp_strip_all_tags($post->post_title), ENT_QUOTES, 'UTF-8'),
-        'content' => $post->post_content,
+        'content' => $content,
         'excerpt' => $settings['excerpt'] ? wp_strip_all_tags($post->post_excerpt) : '',
         'featuredImage' => $settings['image'] ? (get_the_post_thumbnail_url($post_id, 'full') ?: '') : '',
         'imageAlt' => $image && $settings['image'] ? (string) get_post_meta($image, '_wp_attachment_image_alt', true) : '',
@@ -215,7 +221,17 @@ function ttw_translation_enqueue($post, $status, $mode, $force = false) {
 }
 
 add_action('wp_after_insert_post', function ($post_id, $post, $update, $before) {
-    if ($post->post_type !== 'post' || wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) { return; }
+    if (!in_array($post->post_type, array('post', 'page'), true) || wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) { return; }
+    if ($post->post_type === 'page' && $post->post_status === 'publish') {
+        if ($post->post_password !== '') {
+            ttw_translation_withdraw($post);
+            return;
+        }
+        if (ttw_translation_settings()['updates'] && ttw_translation_latest_event($post_id)) {
+            ttw_translation_enqueue($post, 'publish', 'page');
+        }
+        return;
+    }
     if ($post->post_status === 'publish' && ttw_translation_mode($post_id) === 'automatic') {
         $settings = ttw_translation_settings();
         $already_published = $update && $before && $before->post_status === 'publish';
@@ -236,8 +252,26 @@ add_action('wp_restore_post_revision', function ($post_id) {
 });
 
 add_action('before_delete_post', function ($post_id, $post) {
-    if ($post->post_type === 'post' && $post->post_status === 'publish') {
+    if (in_array($post->post_type, array('post', 'page'), true) && $post->post_status === 'publish') {
         ttw_translation_withdraw($post);
+    }
+}, 10, 2);
+
+add_action('ttw_translation_sync_pages', function ($user_id, $cursor) {
+    if (!user_can($user_id, 'manage_options')) { return; }
+    global $wpdb;
+    $ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts} WHERE post_type='page' AND post_status='publish' AND post_password=''
+        AND ID>%d ORDER BY ID LIMIT 25", $cursor
+    ));
+    foreach ($ids as $id) {
+        $post = get_post((int) $id);
+        if ($post && $post->post_status === 'publish' && $post->post_password === '' && user_can($user_id, 'edit_post', $post->ID)) {
+            ttw_translation_enqueue($post, 'publish', 'page', true);
+        }
+    }
+    if (count($ids) === 25) {
+        wp_schedule_single_event(time() + 10, 'ttw_translation_sync_pages', array($user_id, (int) end($ids)));
     }
 }, 10, 2);
 

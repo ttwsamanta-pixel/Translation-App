@@ -1,4 +1,5 @@
 import { defaultWebsite, type Labels, type Website } from '../../../packages/shared/src/website';
+import { normalizeHost } from '../../../packages/shared/src/host';
 import { escape } from './seo';
 
 export type EditionLink = { name: string; code: string; url: string | null; current: boolean };
@@ -9,11 +10,40 @@ export type TemplateContext = {
   rss: boolean;
   editions: EditionLink[];
   categoryLabels?: Record<string, string>;
+  pages?: { slug: string; title: string; canonical: string; mock: number }[];
+  sourceHost?: string;
 };
 type PageLayout = { kind?: 'home' | 'article' | 'archive' | 'page'; path?: string };
 
 const assets = '/assets/ttw';
-const sourceSite = 'https://www.travelandtourworld.com';
+export const pagePath = (slug: string) => '/page/' + encodeURIComponent(slug);
+export const sourcePath = (path: string) => path.replace(/\/+$/, '') || '/';
+export function editionHref(site: TemplateContext, href: string): string | undefined {
+  if (href.startsWith('/') && !href.startsWith('//')) return href;
+  const url = URL.parse(href);
+  if (!url || !['https:', 'http:'].includes(url.protocol)) return;
+  const host = normalizeHost(url.hostname);
+  if (host !== 'travelandtourworld.com' && host !== site.sourceHost) return href;
+  const path = sourcePath(url.pathname);
+  const localRoutes = new Map([
+    ['/', '/'],
+    ['/news', '/news'],
+    ['/interviews', '/interviews'],
+    ['/videos', '/videos'],
+    ['/categories', '/categories'],
+    ['/magazine', '/magazine'],
+    ['/magazines', '/magazine'],
+    ['/magazine-archive', '/magazine'],
+    ['/rss-feeds', site.rss ? '/feed/' : undefined],
+  ]);
+  if (localRoutes.has(path)) return localRoutes.get(path);
+  const configured = site.design.pages.find(
+    (page) => path === '/' + page.slug || path === pagePath(page.slug),
+  );
+  if (configured) return pagePath(configured.slug) + url.hash;
+  const imported = site.pages?.find((page) => sourcePath(new URL(page.canonical).pathname) === path);
+  if (imported) return pagePath(imported.slug) + url.hash;
+}
 export const categoryPath = (name: string) => '/category/' + encodeURIComponent(name);
 export const authorPath = (name: string) => '/author/' + encodeURIComponent(name);
 export const tagPath = (name: string) => '/tag/' + encodeURIComponent(name);
@@ -22,8 +52,9 @@ export const categoryLabel = (site: TemplateContext, name: string) =>
 
 export function adSlot(context: TemplateContext, slot: Website['ads'][number]['slot']) {
   const ad = context.design.ads.find((item) => item.slot === slot);
-  return ad
-    ? `<aside class="ad" aria-label="${escape(context.labels.advertisement)}"><a href="${escape(ad.url)}" rel="sponsored"><img src="${escape(ad.image)}" alt="${escape(ad.label)}" loading="lazy"></a></aside>`
+  const url = ad && editionHref(context, ad.url);
+  return ad && url
+    ? `<aside class="ad" aria-label="${escape(context.labels.advertisement)}"><a href="${escape(url)}" rel="sponsored"><img src="${escape(ad.image)}" alt="${escape(ad.label)}" loading="lazy"></a></aside>`
     : '';
 }
 
@@ -45,11 +76,14 @@ function editionMenu({ editions, design, labels }: TemplateContext) {
       .join('')}</div></details>`;
 }
 
-function pageLink(design: Website, slug: string) {
-  return design.pages.some((page) => page.slug === slug) ? '/' + slug : sourceSite + '/' + slug + '/';
+function pageLink(site: TemplateContext, slug: string) {
+  if (site.design.pages.some((page) => page.slug === slug)) return pagePath(slug);
+  const page = site.pages?.find((item) => sourcePath(new URL(item.canonical).pathname) === '/' + slug);
+  return page ? pagePath(page.slug) : undefined;
 }
 
-function navigation({ design, labels }: TemplateContext) {
+function navigation(site: TemplateContext) {
+  const { design, labels } = site;
   if (design.navigation.length) return design.navigation;
   return [
     { label: labels.home, href: '/' },
@@ -64,17 +98,24 @@ function navigation({ design, labels }: TemplateContext) {
         [labels.team, 'our-team'],
         [labels.contact, 'contact-us'],
       ] as const
-    ).map(([label, slug]) => ({ label, href: pageLink(design, slug) })),
+    ).flatMap(([label, slug]) => {
+      const href = pageLink(site, slug);
+      return href ? [{ label, href }] : [];
+    }),
   ];
 }
 
 function header(site: TemplateContext, path?: string) {
   const { design, labels } = site;
   const menu = `<ul class="primary-nav__list">${navigation(site)
-    .map(
-      ({ href, label }) =>
-        `<li class="menu-item"><a href="${escape(href)}"${href === path ? ' aria-current="page"' : ''}>${escape(label)}</a></li>`,
-    )
+    .flatMap(({ href, label }) => {
+      const url = editionHref(site, href);
+      return url
+        ? [
+            `<li class="menu-item"><a href="${escape(url)}"${url === path ? ' aria-current="page"' : ''}>${escape(label)}</a></li>`,
+          ]
+        : [];
+    })
     .join('')}</ul>`;
   return `<a class="skip-link" href="#primary-content">${escape(labels.skip)}</a>
     <header class="header-main" id="header-main"><div class="container header-main__inner">
@@ -88,7 +129,7 @@ function header(site: TemplateContext, path?: string) {
           <form class="ttw-panel header-search" action="/search" role="search"><label class="screen-reader-text" for="header-search-input">${escape(labels.search)}</label>
           <input id="header-search-input" class="header-search__input" type="search" name="q" placeholder="${escape(labels.search)}" maxlength="120" required><button class="ttw-action">${escape(labels.search)}</button></form>
         </details>
-        ${design.pages.some((page) => page.slug === 'subscribe') ? `<a class="btn btn-download-app ttw-subscribe" href="/subscribe">${escape(labels.subscribe)}</a>` : ''}
+        ${pageLink(site, 'subscribe') ? `<a class="btn btn-download-app ttw-subscribe" href="${escape(pageLink(site, 'subscribe'))}">${escape(labels.subscribe)}</a>` : ''}
         <details class="ttw-disclosure ttw-mobile-nav"><summary class="ttw-icon" aria-label="${escape(labels.menu)}">☰</summary><nav class="ttw-panel" aria-label="${escape(labels.menu)}">${menu}</nav></details>
       </div>
     </div></header>`;
@@ -99,12 +140,15 @@ function footer(site: TemplateContext) {
   const footerLinks = design.footer.length
     ? design.footer
     : [
-        { label: labels.about, href: pageLink(design, 'about-us') },
-        { label: labels.contact, href: pageLink(design, 'contact-us') },
+        { label: labels.about, href: pageLink(site, 'about-us') },
+        { label: labels.contact, href: pageLink(site, 'contact-us') },
+        { label: labels.pages, href: '/pages' },
         { label: labels.magazine, href: '/magazine' },
       ];
-  const link = ({ href, label }: { href: string; label: string }) =>
-    `<li><a href="${escape(href)}">${escape(label)}</a></li>`;
+  const link = ({ href, label }: { href?: string; label: string }) => {
+    const url = href && editionHref(site, href);
+    return url ? `<li><a href="${escape(url)}">${escape(label)}</a></li>` : '';
+  };
   return `<footer class="site-footer"><div class="container site-footer__grid">
     <div class="footer-col footer-col--brand"><a class="footer-logo-badge" href="/"><img
       src="${escape(design.logo ?? assets + '/uploads/TTW-Logo.svg')}" alt="${escape(design.name)}" width="783" height="310" loading="lazy"></a></div>

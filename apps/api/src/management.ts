@@ -310,7 +310,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 
 const lists = {
   articles:
-    "SELECT id,source_post_id,title,category,status,published_at,modified_at FROM articles WHERE (title LIKE ? OR source_post_id LIKE ?) AND (?='' OR status=?) ORDER BY id DESC",
+    "SELECT id,source_post_id,title,category,content_type,status,published_at,modified_at FROM articles WHERE (title LIKE ? OR source_post_id LIKE ?) AND (?='' OR status=?) ORDER BY id DESC",
   jobs: `SELECT j.id,a.title,d.hostname,l.name language,p.name provider,j.state,j.error_code,j.created_at FROM translation_jobs j
     JOIN articles a ON a.id=j.article_id JOIN domains d ON d.id=j.domain_id JOIN languages l ON l.id=d.language_id JOIN translation_providers p ON p.id=j.provider_id
     WHERE (a.title LIKE ? OR CAST(j.id AS CHAR) LIKE ?) AND (?='' OR j.state=?) ORDER BY j.id DESC`,

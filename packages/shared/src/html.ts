@@ -1,5 +1,6 @@
 import { load } from 'cheerio';
 import sanitize from 'sanitize-html';
+import { normalizeHost } from './host';
 
 export function sanitizeArticle(html: string) {
   return sanitize(html, {
@@ -60,7 +61,7 @@ export function htmlSegments(html: string) {
 function visitUrls(
   html: string,
   source: string,
-  visit: (url: URL, write: (value: string) => void, link: boolean) => void,
+  visit: (url: URL, write: (value: string | null) => void, link: boolean) => void,
 ) {
   const $ = load(html, {}, false);
   $('a[href], img[src]').each((_index, node) => {
@@ -73,7 +74,8 @@ function visitUrls(
       visit(
         url,
         (value) => {
-          $(node).attr(property, value);
+          if (value === null) $(node).removeAttr(property);
+          else $(node).attr(property, value);
         },
         property === 'href',
       );
@@ -86,25 +88,42 @@ function visitUrls(
 
 export function linkTargets(html: string, source: string) {
   const found = new Set<string>();
+  const original = new URL(source);
   visitUrls(html, source, (url, _write, link) => {
-    if (!link || url.hostname !== new URL(source).hostname) return;
+    if (!link || normalizeHost(url.hostname) !== normalizeHost(original.hostname)) return;
     url.hash = '';
     url.search = '';
-    const key = url.href.replace(/\/$/, '');
-    if (found.size < 500) {
-      found.add(key);
-      found.add(key + '/');
+    if (found.size < 492) {
+      const path = url.pathname.replace(/\/$/, '');
+      const host = normalizeHost(original.hostname);
+      for (const scheme of ['https:', 'http:']) {
+        for (const variant of [host, 'www.' + host]) {
+          const key = scheme + '//' + variant + path;
+          found.add(key);
+          found.add(key + '/');
+        }
+      }
     }
   });
   return [...found];
 }
 
-export function rewriteLinks(html: string, source: string, translations: Map<string, string>) {
+export function rewriteLinks(
+  html: string,
+  source: string,
+  translations: Map<string, string>,
+  resolveNavigation?: (href: string) => string | undefined,
+) {
   return visitUrls(html, source, (url, write, link) => {
     const suffix = url.search + url.hash;
     url.search = '';
     url.hash = '';
     const path = link ? translations.get(url.href.replace(/\/$/, '')) : undefined;
+    if (link && resolveNavigation && !path) {
+      const href = resolveNavigation(url.href + suffix);
+      write(href ?? null);
+      return;
+    }
     write((path ?? url.href) + suffix);
   });
 }
